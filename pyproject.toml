@@ -1,0 +1,14 @@
+[project]
+name = "demo-1"
+version = "0.1.0"
+description = "Order dialogue demo with agent architecture"
+readme = "README.md"
+requires-python = ">=3.8,<3.12"
+dependencies = []
+
+[tool.poetry.dependencies]
+pydantic = ">=1.10"
+sqlalchemy = ">=1.4"
+
+[tool.poetry.dev-dependencies]
+pytest = ">=7.0"
