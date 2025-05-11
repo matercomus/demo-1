@@ -1,6 +1,6 @@
 from models import Product, Order
 from typing import List
-from sqlalchemy import create_engine, Column, Integer, String, Float
+from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 Base = declarative_base()
@@ -11,6 +11,21 @@ class ProductDB(Base):
     name = Column(String, nullable=False)
     price = Column(Float, nullable=False)
     stock = Column(Integer, nullable=False)
+
+class OrderDB(Base):
+    __tablename__ = 'orders'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    product_id = Column(Integer, ForeignKey('products.id'), nullable=False)
+    product_name = Column(String, nullable=False)
+    quantity = Column(Integer, nullable=False)
+    unit_price = Column(Float, nullable=False)
+    total_price = Column(Float, nullable=False)
+    recipient_name = Column(String, nullable=False)
+    recipient_phone = Column(String, nullable=False)
+    recipient_email = Column(String, nullable=False)
+    address = Column(String, nullable=False)
+    delivery_time = Column(String, nullable=False)
+    payment_method = Column(String, nullable=False)
 
 class ProductTool:
     """
@@ -54,6 +69,41 @@ class ProductTool:
         price = db_product.price if db_product else 0.0
         session.close()
         return price
+
+class OrdersTool:
+    """
+    Tool for saving orders and updating product stock.
+    """
+    def __init__(self, engine):
+        self.engine = engine
+        self.Session = sessionmaker(bind=self.engine)
+
+    def save_order(self, order: Order, payment_method: str):
+        session = self.Session()
+        db_order = OrderDB(
+            product_id=order.product.id,
+            product_name=order.product.name,
+            quantity=order.quantity,
+            unit_price=order.unit_price,
+            total_price=order.total_price,
+            recipient_name=order.recipient_info.name,
+            recipient_phone=order.recipient_info.phone,
+            recipient_email=str(order.recipient_info.email),
+            address=order.address,
+            delivery_time=order.delivery_time,
+            payment_method=payment_method
+        )
+        session.add(db_order)
+        session.commit()
+        session.close()
+
+    def decrement_stock(self, product_id: int, quantity: int):
+        session = self.Session()
+        db_product = session.query(ProductDB).filter_by(id=product_id).first()
+        if db_product and db_product.stock >= quantity:
+            db_product.stock -= quantity
+            session.commit()
+        session.close()
 
 class PaymentTool:
     """

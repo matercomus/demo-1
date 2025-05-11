@@ -1,5 +1,5 @@
 from models import Order, Product, RecipientInfo
-from tools import ProductTool, PaymentTool
+from tools import ProductTool, PaymentTool, OrdersTool
 from utils.ui import TerminalUI
 from typing import Optional
 from pydantic import ValidationError
@@ -14,6 +14,7 @@ class MockAgent:
         self.ui = ui
         self.product_tool = ProductTool(db_path=db_path)
         self.payment_tool = PaymentTool()
+        self.orders_tool = OrdersTool(self.product_tool.engine)
 
     def start_order(self):
         self.ui.print_section('Start New Order')
@@ -58,6 +59,9 @@ class MockAgent:
         if not self.payment_tool.process_payment(order, payment_method):
             self.ui.print_error('Payment failed. Order cancelled.')
             return
+        # Update DB: decrement stock and save order
+        self.orders_tool.decrement_stock(order.product.id, order.quantity)
+        self.orders_tool.save_order(order, payment_method)
         self.ui.print_success('Order completed successfully!')
         self.ui.print_order_summary(order)
 

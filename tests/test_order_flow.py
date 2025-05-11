@@ -10,7 +10,7 @@ def clean_db():
 
 from agent import MockAgent
 from models import Order, Product, OrderInput
-from tools import ProductTool
+from tools import ProductTool, ProductDB, OrderDB
 from utils.ui import TerminalUI
 from pydantic import ValidationError
 
@@ -146,4 +146,25 @@ def test_agent_invalid_email_then_valid():
     agent.start_order()
     # Should see Pydantic error for invalid email, then success
     assert any("value is not a valid email address" in o for o in ui.outputs)
-    assert any("Order completed successfully" in o for o in ui.outputs) 
+    assert any("Order completed successfully" in o for o in ui.outputs)
+
+def test_order_persistence_and_stock():
+    # Place an order and check DB for order and stock update
+    inputs = ["1", "2", "y", "Alice", "+1 234-567-8901", "alice@example.com", "123 Main St", "Tomorrow", "card"]
+    ui = MockUI(inputs)
+    agent = MockAgent(ui=ui, db_path=TEST_DB)
+    agent.start_order()
+    # Check DB
+    engine = agent.product_tool.engine
+    Session = agent.product_tool.Session
+    session = Session()
+    # Check order exists
+    orders = session.query(OrderDB).all()
+    assert len(orders) == 1
+    order = orders[0]
+    assert order.product_name == "Widget"
+    assert order.quantity == 2
+    # Check stock decremented
+    product = session.query(ProductDB).filter_by(name="Widget").first()
+    assert product.stock == 8
+    session.close() 
