@@ -24,6 +24,9 @@ class TerminalUI:
     def print_success(self, message: str):
         print(f"[SUCCESS] {message}\n")
 
+    def print_info(self, message: str):
+        print(f"[INFO] {message}\n")
+
     def print_products(self, products: List[Product]):
         print("Available Products:")
         for idx, p in enumerate(products, 1):

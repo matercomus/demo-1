@@ -31,11 +31,12 @@ class ProductTool:
     """
     Tool for managing and querying products using a file-based SQLite database.
     """
-    def __init__(self, db_path='products.db'):
+    def __init__(self, db_path='products.db', seed: bool = True):
         self.engine = create_engine(f'sqlite:///{db_path}', echo=True)
         Base.metadata.create_all(self.engine)
         self.Session = sessionmaker(bind=self.engine)
-        self._seed_products()
+        if seed:
+            self._seed_products()
 
     def _seed_products(self):
         session = self.Session()
@@ -70,6 +71,13 @@ class ProductTool:
         session.close()
         return price
 
+    def add_product(self, name: str, price: float, stock: int):
+        session = self.Session()
+        product = ProductDB(name=name, price=price, stock=stock)
+        session.add(product)
+        session.commit()
+        session.close()
+
 class OrdersTool:
     """
     Tool for saving orders and updating product stock.
@@ -95,7 +103,30 @@ class OrdersTool:
         )
         session.add(db_order)
         session.commit()
+        order_id = db_order.id
         session.close()
+        return order_id
+
+    def show_orders(self):
+        session = self.Session()
+        orders = session.query(OrderDB).all()
+        result = []
+        for o in orders:
+            result.append({
+                'id': o.id,
+                'product_name': o.product_name,
+                'quantity': o.quantity,
+                'unit_price': o.unit_price,
+                'total_price': o.total_price,
+                'recipient_name': o.recipient_name,
+                'recipient_phone': o.recipient_phone,
+                'recipient_email': o.recipient_email,
+                'address': o.address,
+                'delivery_time': o.delivery_time,
+                'payment_method': o.payment_method
+            })
+        session.close()
+        return result
 
     def decrement_stock(self, product_id: int, quantity: int):
         session = self.Session()
