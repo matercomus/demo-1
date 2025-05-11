@@ -20,6 +20,7 @@ from pydantic_ai.tools import RunContext
 import os
 from dotenv import load_dotenv
 import sys
+from rich.table import Table
 
 @dataclass
 class OrderService:
@@ -148,31 +149,72 @@ class LLMAgent:
         self.cancel_order = cancel_order
 
         @self.agent.tool
-        async def list_products(ctx: RunContext[OrderService]) -> str:
+        async def list_products(ctx: RunContext[OrderService]):
             products = ctx.deps.product_tool.list_products()
             if not products:
                 return "No products are currently available."
-            return "Available products:\n" + "\n".join(
-                f"- {p.name} (${p.price:.2f}, stock: {p.stock})" for p in products
-            )
+            columns = ["#", "Name", "Price", "Stock"]
+            rows = []
+            for idx, p in enumerate(products, 1):
+                stock_str = str(p.stock) if p.stock > 0 else "OUT OF STOCK"
+                rows.append([str(idx), p.name, f"${p.price:.2f}", stock_str])
+            rows.append(["0", "Cancel", "", ""])
+            return {
+                "type": "__TABLE_RESULT__",
+                "title": "Available Products",
+                "columns": columns,
+                "rows": rows,
+                "message": "Please select a product by number."
+            }
 
         @self.agent.tool
-        async def show_orders(ctx: RunContext[OrderService]) -> str:
+        async def show_orders(ctx: RunContext[OrderService]):
             orders = ctx.deps.orders_tool.show_orders()
             if not orders:
                 return "No orders found."
-            lines = []
+            columns = ["ID", "Product", "Qty", "Total", "Recipient", "Address", "Delivery Time", "Payment"]
+            rows = []
             for o in orders:
-                lines.append(
-                    f"Order #{o['id']}: {o['product_name']} x{o['quantity']} for ${o['total_price']:.2f} to {o['recipient_name']} ({o['recipient_email']}, {o['recipient_phone']}) at {o['address']} on {o['delivery_time']} [Payment: {o['payment_method']}]"
-                )
-            return "\n".join(lines)
-        self.show_orders = show_orders
+                rows.append([
+                    str(o.get('id', '')),
+                    o.get('product_name', ''),
+                    str(o.get('quantity', '')),
+                    f"${o.get('total_price', 0):.2f}",
+                    f"{o.get('recipient_name', '')} ({o.get('recipient_email', '')}, {o.get('recipient_phone', '')})",
+                    o.get('address', ''),
+                    o.get('delivery_time', ''),
+                    o.get('payment_method', '')
+                ])
+            return {
+                "type": "__TABLE_RESULT__",
+                "title": "Orders",
+                "columns": columns,
+                "rows": rows,
+                "message": "Here are your orders."
+            }
 
         @self.agent.tool
         async def stop_chat(ctx: RunContext[OrderService]) -> str:
             return "Conversation ended. Thank you for visiting!"
         self.stop_chat = stop_chat
+
+        @self.agent.tool
+        async def stock_info(ctx: RunContext[OrderService]):
+            products = ctx.deps.product_tool.list_products()
+            if not products:
+                return "No products are currently available."
+            columns = ["#", "Name", "Stock"]
+            rows = []
+            for idx, p in enumerate(products, 1):
+                stock_str = str(p.stock) if p.stock > 0 else "OUT OF STOCK"
+                rows.append([str(idx), p.name, stock_str])
+            return {
+                "type": "__TABLE_RESULT__",
+                "title": "Product Stock Information",
+                "columns": columns,
+                "rows": rows,
+                "message": "Here is the stock information for available products."
+            }
 
     def start_order(self):
         asyncio.run(self._start_order_async())
@@ -192,7 +234,13 @@ class LLMAgent:
                 message_history=message_history
             )
             if result.output:
-                self.ui.print_info(f"AI: {result.output}")
+                output = result.output
+                if isinstance(output, dict) and output.get("type") == "__TABLE_RESULT__":
+                    table = self.ui.build_table_message(output["columns"], output["rows"], title=output.get("title"))
+                    msg = output.get("message", "")
+                    self.ui.print_agent_response([table, msg] if msg else [table])
+                else:
+                    self.ui.print_agent_response(str(output))
             # Check if the LLM called stop_chat tool in this turn
             stop = False
             for msg in result.new_messages():
@@ -206,6 +254,7 @@ class LLMAgent:
                 break
             message_history = result.all_messages()
             user_input = self.ui.prompt("Your response:")
+            self.ui.print_user_response(user_input)
 
     def _select_product(self) -> Optional[Product]:
         products = self.product_tool.list_products()
