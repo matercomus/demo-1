@@ -1,90 +1,96 @@
-# Demo 1
+# Demo 1 — Conversational Order System
 
-## Description from Boss
+## Overview
 
-### completing the order action through dialogue:
+Demo 1 is a conversational order system that lets users place, review, and cancel product orders through a natural, multi-turn dialogue in the terminal. The system uses an LLM-powered agent (via [pydantic-ai](https://github.com/pydantic-ai/pydantic-ai)) to guide users through product selection, recipient info, delivery details, and payment, all in a human-like conversation.
 
-1. It is necessary to collect order information in a dialogue (voice or text). The way to collect information in a dialogue conforms to the way of human communication, which may be one sentence or multiple rounds. The purpose of the dialogue is to help the user choose the goods, the number of goods, the receiving address, the recipient's information, and the receiving time.
+- Place orders for products in stock
+- Confirm order details and recipient info
+- Choose payment method and complete the order
+- View and cancel any order by ID
+- All data is persisted in a local SQLite database
 
-2. After the user selects a product, call tools or function call to check if the product is in stock and its price, and let the user confirm the total price of the order (the unit price of the product + the quantity of the product; if the product is out of stock or the user cancels, terminate and wait for the next conversation)
+## Getting Started
 
-3. After the second confirmation is completed, continue to let the user confirm the recipient information of the goods, the receiving address, the receiving time, and the user confirms that the user is prompted to choose the payment method
-After the user completes the payment, call tools or function call to complete the order action
+### 1. Clone the repository
 
-## Plan
+```bash
+git clone git@github.com:matercomus/demo-1.git
+cd demo-1
+```
 
-### 1. Define the Dialogue Flow
-- Use **pydantic-ai** for agentic dialogue management and input validation.
-- The agent will:
-  1. Greet the user and start the order process.
-  2. Collect product selection and quantity using structured prompts.
-  3. Check product stock and price.
-  4. Confirm order summary (product, quantity, total price) with the user.
-  5. Collect recipient info, address, and delivery time.
-  6. Confirm all details with the user.
-  7. Present payment method options.
-  8. Simulate payment and complete the order.
-- **Tools/Modules:**
-  - [pydantic-ai](https://github.com/pydantic-ai/pydantic-ai) for dialogue management and validation
-  - Python functions and control flow for orchestration
+### 2. Python Version
 
-### 2. Design Data Structures
-- Product catalog (list/dict with name, stock, price).
-- Order object (product, quantity, recipient info, address, time, payment method).
-- **Tools/Modules:**
-  - Python built-in types: `dict`, `list`, `dataclasses.dataclass`
-  - [pydantic](https://pydantic-docs.helpmanual.io/) for data validation
-  - SQLAlchemy models for persistent storage
+This project requires **Python >=3.8**.
 
-### 3. Implement Dialogue Management
-- Use **pydantic-ai** to manage conversation state and multi-turn dialogue.
-- Route all user input through pydantic-ai for intent extraction and slot filling.
-- **Tools/Modules:**
-  - [pydantic-ai](https://github.com/pydantic-ai/pydantic-ai)
+### 3. Install dependencies & Run (with uv)
 
-### 4. Implement Product and Order Persistence
-- Implement product lookup, stock check, and price check using SQLAlchemy.
-- Save orders and update product stock in the database.
-- **Tools/Modules:**
-  - SQLAlchemy for database operations
-  - Python functions for business logic
+#### Option A: Using [uv](https://github.com/astral-sh/uv) (recommended)
 
-### 5. Order Confirmation and Payment
-- After collecting all info, show a summary and ask for confirmation (via pydantic-ai response).
-- Simulate payment as a function.
-- **Tools/Modules:**
-  - Python functions for payment simulation
-  - For real payment: Integrate with payment APIs if needed
+If you have [uv](https://github.com/astral-sh/uv) installed, you can run the project directly—no need to manually create or activate a virtual environment:
 
-### 6. Error Handling and Cancellation
-- Handle cases where product is out of stock or user cancels using agent logic.
-- Allow user to restart or exit at any point.
-- **Tools/Modules:**
-  - Python: `try/except`, custom exceptions
-  - Logging: `logging` module
+```bash
+uv run python main.py
+```
 
-### 7. User Interface
-- For demo, use text-based CLI (input/output in terminal), routing all input/output through the agent and pydantic-ai.
-- Optionally, structure code to allow easy extension to voice or web UI.
-- **Tools/Modules:**
-  - CLI: `input()`, `print()`
-  - For voice: [SpeechRecognition](https://pypi.org/project/SpeechRecognition/), [pyttsx3](https://pypi.org/project/pyttsx3/) for TTS
-  - For web: [Flask](https://flask.palletsprojects.com/), [FastAPI](https://fastapi.tiangolo.com/)
+Or, to specify an agent:
 
-### 8. Testing
-- Prepare a few test scenarios (happy path, out-of-stock, user cancels, DB operations, etc.).
-- **Tools/Modules:**
-  - [pytest](https://docs.pytest.org/en/stable/)
-  - For CLI automation: [pexpect](https://pexpect.readthedocs.io/en/stable/)
-  - SQLAlchemy for DB assertions
+```bash
+uv run python main.py --agent mock
+uv run python main.py --agent pydantic
+uv run python main.py --agent llm
+```
+
+uv will automatically create a virtual environment and install dependencies as needed.
+
+#### Option B: Using pip
+
+If you prefer classic pip:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+> You may need to install additional dependencies if you use LLMs or other features.
+
+### 4. Set up your `.env` file
+
+Create a `.env` file in the project root (this file is ignored by git):
+
+```
+# LLM model to use (default: openai:gpt-4o)
+OPENAI_MODEL=openai:gpt-4o
+# If using OpenAI or other providers, you may also need:
+# OPENAI_API_KEY=sk-...
+```
+
+### 5. Using the System
+
+- Follow the prompts to select products, enter recipient and delivery info, and confirm your order.
+- You can view all orders, and cancel any order by its ID.
+- To exit, follow the prompts or press `Ctrl+C` or `Ctrl+D` (EOF).
+
+## Project Structure
+
+- `main.py` — Starts the CLI and agent.
+- `agents/` — Agent implementations (LLM, mock, pydantic).
+- `tools.py` — Product/order persistence and payment simulation.
+- `models.py` — Data models and validation.
+- `utils/ui.py` — Terminal UI logic.
+- `tests/` — Automated tests (run with `pytest`).
+
+## Testing
+
+To run all tests:
+
+```bash
+pytest
+```
 
 ---
 
-#### Example File Structure
-
-- `main.py` — Starts the CLI, initializes the agent with pydantic-ai.
-- `tools.py` — Implements product and order persistence, payment simulation.
-- `models.py` — Pydantic models for validation and SQLAlchemy models for persistence.
-- `utils/ui.py` — Terminal UI logic.
-- `tests/` — Pytest-based tests for all flows and DB operations.
+**Enjoy your conversational ordering experience!**  
+For questions or contributions, please open an issue or pull request.
 
