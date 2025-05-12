@@ -9,3 +9,6 @@ wheels/
 # Virtual environments
 .venv
 .env
+.vscode/settings.json
+products.db
+test_products.db
