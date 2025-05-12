@@ -32,7 +32,7 @@ class ProductTool:
     Tool for managing and querying products using a file-based SQLite database.
     """
     def __init__(self, db_path='products.db', seed: bool = True):
-        self.engine = create_engine(f'sqlite:///{db_path}', echo=True)
+        self.engine = create_engine(f'sqlite:///{db_path}', echo=False)
         Base.metadata.create_all(self.engine)
         self.Session = sessionmaker(bind=self.engine)
         if seed:

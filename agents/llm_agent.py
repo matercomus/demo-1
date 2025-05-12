@@ -76,6 +76,7 @@ class LLMAgent:
             payment_method: str,
         ) -> str:
             try:
+                ctx.deps.ui.print_db_info("Placing new order in the database...")
                 products = ctx.deps.product_tool.list_products()
                 product = next((p for p in products if p.name.lower() == product_name.lower()), None)
                 if not product:
@@ -99,9 +100,14 @@ class LLMAgent:
                     address=address,
                     delivery_time=delivery_time,
                 )
+                # Show pending summary and ask for confirmation
+                ctx.deps.ui.print_pending_order_summary(order)
+                if not ctx.deps.ui.prompt_yes_no("Do you want to confirm and place this order?"):
+                    return "Order not confirmed. Cancelled by user."
                 ctx.deps.orders_tool.decrement_stock(product.id, quantity)
                 order_id = ctx.deps.orders_tool.save_order(order, payment_method)
                 self.last_order_id = order_id  # Track last order ID
+                ctx.deps.ui.print_confirmed_order(order)
                 return (
                     f"Order placed successfully!\n"
                     f"  Product: {product.name}\n"
@@ -121,7 +127,11 @@ class LLMAgent:
 
         @self.agent.tool
         async def cancel_order(ctx: RunContext[OrderService], order_id: int) -> str:
-            # Remove specified order and restore stock
+            ctx.deps.ui.print_db_info(f"Cancelling order {order_id} in the database...")
+            # Confirm cancellation
+            ctx.deps.ui.print_cancel_confirmation(order_id)
+            if not ctx.deps.ui.prompt_yes_no(f"Are you sure you want to cancel order {order_id}?"):
+                return f"Cancellation of order {order_id} aborted by user."
             session = ctx.deps.orders_tool.Session()
             order_db = session.query(OrderDB).filter_by(id=order_id).first()
             if not order_db:
@@ -137,11 +147,13 @@ class LLMAgent:
             # If the cancelled order was the last_order_id, clear it
             if self.last_order_id == order_id:
                 self.last_order_id = None
+            ctx.deps.ui.print_cancelled_order(order_id)
             return f"Order {order_id} cancelled and removed from the database."
         self.cancel_order = cancel_order
 
         @self.agent.tool
         async def list_products(ctx: RunContext[OrderService]):
+            ctx.deps.ui.print_db_info("Fetching product list from the database...")
             products = ctx.deps.product_tool.list_products()
             if not products:
                 return "No products are currently available."
@@ -161,6 +173,7 @@ class LLMAgent:
 
         @self.agent.tool
         async def show_orders(ctx: RunContext[OrderService]):
+            ctx.deps.ui.print_db_info("Fetching orders from the database...")
             orders = ctx.deps.orders_tool.show_orders()
             if not orders:
                 return "No orders found."
@@ -177,6 +190,8 @@ class LLMAgent:
                     o.get('delivery_time', ''),
                     o.get('payment_method', '')
                 ])
+            # Add info panel for DB orders
+            ctx.deps.ui.print_info("These are confirmed orders from the database.")
             return {
                 "type": "__TABLE_RESULT__",
                 "title": "Orders",
@@ -193,6 +208,7 @@ class LLMAgent:
 
         @self.agent.tool
         async def stock_info(ctx: RunContext[OrderService]):
+            ctx.deps.ui.print_db_info("Fetching product stock from the database...")
             products = ctx.deps.product_tool.list_products()
             if not products:
                 return "No products are currently available."

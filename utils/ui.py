@@ -7,6 +7,7 @@ from rich.table import Table
 from rich.text import Text
 from rich.align import Align
 from rich.console import Group
+from prettytable import PrettyTable
 
 TABLE_RESULT_MARKER = "__TABLE_RESULT__"
 
@@ -86,6 +87,36 @@ class TerminalUI:
         table.add_row("Delivery Time", order.delivery_time)
         self.console.print(Panel(table, title="[bold cyan]Order Summary[/bold cyan]", style="cyan"))
 
+    def print_pending_order_summary(self, order: Order):
+        table = Table(title="[yellow]Pending Order (Not Yet Confirmed)[/yellow]", show_header=False, box=None)
+        table.add_row("Product", order.product.name if order.product else "-")
+        table.add_row("Quantity", str(order.quantity))
+        table.add_row("Unit Price", f"${order.unit_price:.2f}")
+        table.add_row("Total Price", f"${order.total_price:.2f}")
+        if order.recipient_info:
+            table.add_row("Recipient", f"{order.recipient_info.name} ({order.recipient_info.email}, {order.recipient_info.phone})")
+        table.add_row("Address", order.address)
+        table.add_row("Delivery Time", order.delivery_time)
+        self.console.print(Panel(table, title="[bold yellow]Review Your Order[/bold yellow]", style="yellow", subtitle="[bold red]Not yet confirmed![/bold red]"))
+
+    def print_confirmed_order(self, order: Order):
+        table = Table(title="[green]Order Confirmed![/green]", show_header=False, box=None)
+        table.add_row("Product", order.product.name if order.product else "-")
+        table.add_row("Quantity", str(order.quantity))
+        table.add_row("Unit Price", f"${order.unit_price:.2f}")
+        table.add_row("Total Price", f"${order.total_price:.2f}")
+        if order.recipient_info:
+            table.add_row("Recipient", f"{order.recipient_info.name} ({order.recipient_info.email}, {order.recipient_info.phone})")
+        table.add_row("Address", order.address)
+        table.add_row("Delivery Time", order.delivery_time)
+        self.console.print(Panel(table, title="[bold green]Order Placed Successfully![/bold green]", style="bold green", subtitle="[bold]Thank you for your order![/bold]"))
+
+    def print_cancel_confirmation(self, order_id: int):
+        self.console.print(Panel.fit(f"[bold yellow]Are you sure you want to cancel order [red]{order_id}[/red]? This action cannot be undone.[/bold yellow]", style="yellow"))
+
+    def print_cancelled_order(self, order_id: int):
+        self.console.print(Panel.fit(f"[bold red]Order {order_id} has been cancelled and removed from the database.[/bold red]", style="red"))
+
     def prompt(self, message: str) -> str:
         return input(f"{message} ").strip()
 
@@ -107,18 +138,18 @@ class TerminalUI:
             if resp in ("n", "no"): return False
             print("Please enter 'y' or 'n'.")
 
+    def print_db_info(self, message: str):
+        # Small, consistent info dialog for DB operations
+        self.console.print(Panel.fit(f"[bold blue][DB][/bold blue] {message}", style="bold blue"))
+
     def print_orders_table(self, orders):
-        table = Table(title="Orders", show_header=True, header_style="bold magenta")
-        table.add_column("ID", style="dim", width=4)
-        table.add_column("Product")
-        table.add_column("Qty", justify="right")
-        table.add_column("Total", justify="right")
-        table.add_column("Recipient")
-        table.add_column("Address")
-        table.add_column("Delivery Time")
-        table.add_column("Payment")
+        table = PrettyTable()
+        table.field_names = ["ID", "Product", "Qty", "Total", "Recipient", "Address", "Delivery Time", "Payment"]
+        table.align = "l"
+        table.align["Qty"] = "r"
+        table.align["Total"] = "r"
         for o in orders:
-            table.add_row(
+            table.add_row([
                 str(o.get('id', '')),
                 o.get('product_name', ''),
                 str(o.get('quantity', '')),
@@ -127,7 +158,7 @@ class TerminalUI:
                 o.get('address', ''),
                 o.get('delivery_time', ''),
                 o.get('payment_method', '')
-            )
+            ])
         self.console.print(table)
 
     def build_table_message(self, columns, rows, title=None):
