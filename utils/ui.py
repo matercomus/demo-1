@@ -20,7 +20,19 @@ class TerminalUI:
         self.console = Console()
 
     def print_welcome(self):
-        self.console.print(Panel.fit("[bold magenta]Welcome to the Order System[/bold magenta]", title="[cyan]==============================[/cyan]", subtitle="[cyan]==============================[/cyan]", style="bold green"))
+        self.console.print(Panel.fit(
+            "[bold magenta]Welcome to the Order System[/bold magenta]\n\n"
+            "[bold]What you can do:[/bold]\n"
+            "[green]•[/green] Place a new order for any available product\n"
+            "[green]•[/green] View the list of products and their stock\n"
+            "[green]•[/green] Check your order history\n"
+            "[green]•[/green] Cancel an order (if needed)\n"
+            "[green]•[/green] Type 'stop chat' at any time to exit\n\n"
+            "[dim]Tip: Just type what you want, e.g. 'order a Widget', 'show stock', or 'cancel my last order'.[/dim]",
+            title="[cyan]==============================[/cyan]",
+            subtitle="[cyan]==============================[/cyan]",
+            style="bold green"
+        ))
 
     def print_goodbye(self):
         self.console.print(Panel.fit("Thank you for using the Order System. Goodbye!", style="bold magenta"))

@@ -55,9 +55,9 @@ def test_cancel_order(agent_and_service):
     # Set last_order_id to the last order's ID
     last_order = service.orders_tool.show_orders()[-1]
     agent.last_order_id = last_order['id']
-    # Cancel the order
-    result = asyncio.run(agent.cancel_order(FakeRunContext(service)))
-    assert "Order cancelled" in result
+    # Cancel the order (now requires order_id)
+    result = asyncio.run(agent.cancel_order(FakeRunContext(service), order_id=last_order['id']))
+    assert "cancelled" in result
 
 def test_stop_chat(agent_and_service):
     agent, service = agent_and_service
@@ -74,4 +74,46 @@ def test_stop_chat_tool_called(agent_and_service):
     with patch.object(agent, 'stop_chat', wraps=agent.stop_chat) as mock_stop_chat:
         result = asyncio.run(agent.stop_chat(FakeRunContext(service)))
         mock_stop_chat.assert_called_once()
-        assert "Conversation ended" in result 
+        assert "Conversation ended" in result
+
+def test_cancel_specific_order(agent_and_service):
+    agent, service = agent_and_service
+    # Place two orders
+    asyncio.run(agent.place_order(
+        FakeRunContext(service),
+        product_name="Widget",
+        quantity=1,
+        name="User1",
+        phone="111",
+        email="user1@example.com",
+        address="Addr1",
+        delivery_time="soon",
+        payment_method="card"
+    ))
+    asyncio.run(agent.place_order(
+        FakeRunContext(service),
+        product_name="Widget",
+        quantity=1,
+        name="User2",
+        phone="222",
+        email="user2@example.com",
+        address="Addr2",
+        delivery_time="later",
+        payment_method="card"
+    ))
+    orders = service.orders_tool.show_orders()
+    assert len(orders) == 2
+    # Cancel the first order by ID
+    first_order_id = orders[0]['id']
+    result = asyncio.run(agent.cancel_order(FakeRunContext(service), order_id=first_order_id))
+    assert f"Order {first_order_id} cancelled" in result
+    # Only one order should remain, and it should not be the cancelled one
+    remaining_orders = service.orders_tool.show_orders()
+    assert len(remaining_orders) == 1
+    assert remaining_orders[0]['id'] != first_order_id
+
+def test_cancel_nonexistent_order(agent_and_service):
+    agent, service = agent_and_service
+    # Try to cancel an order with a high, non-existent ID
+    result = asyncio.run(agent.cancel_order(FakeRunContext(service), order_id=9999))
+    assert "not found" in result 

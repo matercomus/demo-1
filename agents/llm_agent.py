@@ -1,26 +1,17 @@
 import asyncio
 from dataclasses import dataclass
-from models import Order, Product, RecipientInfo, OrderInput
+from models import Order, Product, RecipientInfo
 from tools import ProductTool, PaymentTool, OrdersTool, OrderDB, ProductDB
 from utils.ui import TerminalUI
 from typing import Optional
 from pydantic_ai import Agent
 from pydantic_ai.messages import (
-    FinalResultEvent,
     FunctionToolCallEvent,
-    FunctionToolResultEvent,
-    PartDeltaEvent,
-    PartStartEvent,
-    TextPartDelta,
-    ToolCallPartDelta,
-    UserPromptPart,
-    ModelMessage,
 )
 from pydantic_ai.tools import RunContext
 import os
 from dotenv import load_dotenv
 import sys
-from rich.table import Table
 
 @dataclass
 class OrderService:
@@ -54,17 +45,17 @@ class LLMAgent:
             system_prompt=(
                 'You are an order assistant. To process an order, you must call the `place_order` tool with the following fields: '
                 'product_name, quantity, name, phone, email, address, delivery_time, payment_method.\n'
-                'To cancel the most recent order in this session, call the `cancel_order` tool.\n'
+                'To cancel any order, call the `cancel_order` tool with the order_id.\n'
                 'To show all orders, call the `show_orders` tool.\n'
                 'To end the conversation, call the `stop_chat` tool.\n'
                 'Do not claim to perform actions unless you call the corresponding tool.\n'
-                'If the user asks to cancel an order, only use the `cancel_order` tool if an order was placed in this session. Otherwise, say there is no order to cancel.\n'
+                'If the user asks to cancel an order, ask for the order ID if not provided, and use the `cancel_order` tool.\n'
                 'If the user wants to stop, call the `stop_chat` tool.\n'
                 'After collecting the info, summarize the order and confirm with the user.\n'
                 'To actually place the order in the database, you must call the `place_order` tool.\n'
                 'Example tool calls:\n'
                 'place_order(product_name="Widget", quantity=2, name="John Doe", phone="123-456-7890", email="john@example.com", address="123 Main St", delivery_time="tomorrow 10am", payment_method="card")\n'
-                'cancel_order()\n'
+                'cancel_order(order_id=3)\n'
                 'show_orders()\n'
                 'stop_chat()\n'
             ),
@@ -129,14 +120,13 @@ class LLMAgent:
         self.place_order = place_order
 
         @self.agent.tool
-        async def cancel_order(ctx: RunContext[OrderService]) -> str:
-            # Remove last order and restore stock
-            if self.last_order_id is None:
-                return "No order to cancel."
+        async def cancel_order(ctx: RunContext[OrderService], order_id: int) -> str:
+            # Remove specified order and restore stock
             session = ctx.deps.orders_tool.Session()
-            order_db = session.query(OrderDB).filter_by(id=self.last_order_id).first()
+            order_db = session.query(OrderDB).filter_by(id=order_id).first()
             if not order_db:
-                return "Order not found."
+                session.close()
+                return f"Order with ID {order_id} not found."
             # Restore stock
             product_db = session.query(ProductDB).filter_by(id=order_db.product_id).first()
             if product_db:
@@ -144,8 +134,10 @@ class LLMAgent:
             session.delete(order_db)
             session.commit()
             session.close()
-            self.last_order_id = None
-            return "Order cancelled and removed from the database."
+            # If the cancelled order was the last_order_id, clear it
+            if self.last_order_id == order_id:
+                self.last_order_id = None
+            return f"Order {order_id} cancelled and removed from the database."
         self.cancel_order = cancel_order
 
         @self.agent.tool
@@ -192,6 +184,7 @@ class LLMAgent:
                 "rows": rows,
                 "message": "Here are your orders."
             }
+        self.show_orders_tool = show_orders
 
         @self.agent.tool
         async def stop_chat(ctx: RunContext[OrderService]) -> str:
@@ -233,14 +226,6 @@ class LLMAgent:
                 deps=self.order_service,
                 message_history=message_history
             )
-            if result.output:
-                output = result.output
-                if isinstance(output, dict) and output.get("type") == "__TABLE_RESULT__":
-                    table = self.ui.build_table_message(output["columns"], output["rows"], title=output.get("title"))
-                    msg = output.get("message", "")
-                    self.ui.print_agent_response([table, msg] if msg else [table])
-                else:
-                    self.ui.print_agent_response(str(output))
             # Check if the LLM called stop_chat tool in this turn
             stop = False
             for msg in result.new_messages():
@@ -249,9 +234,19 @@ class LLMAgent:
                         stop = True
                         break
             if stop:
-                self.ui.print_success("Conversation ended by LLM via stop_chat tool.")
+                # Print the exact shutdown message for test compatibility and show in the assistant bubble
+                msg = "Conversation ended by LLM via stop_chat tool."
+                print(msg)
+                self.ui.print_agent_response(msg)
                 sys.exit(0)
-                break
+            if result.output:
+                output = result.output
+                if isinstance(output, dict) and output.get("type") == "__TABLE_RESULT__":
+                    table = self.ui.build_table_message(output["columns"], output["rows"], title=output.get("title"))
+                    msg = output.get("message", "")
+                    self.ui.print_agent_response([table, msg] if msg else [table])
+                else:
+                    self.ui.print_agent_response(str(output))
             message_history = result.all_messages()
             user_input = self.ui.prompt("Your response:")
             self.ui.print_user_response(user_input)
@@ -262,4 +257,20 @@ class LLMAgent:
         idx = self.ui.prompt_int('Select product by number (0 to cancel):', min_value=0, max_value=len(products))
         if idx == 0:
             return None
-        return products[idx-1] 
+        return products[idx-1]
+
+    async def show_orders(self, ctx):
+        # For test compatibility: call the show_orders tool and return a string summary
+        result = await self.show_orders_tool(ctx)
+        # If result is a table dict, return a simple string for test assertion
+        if isinstance(result, dict) and result.get("type") == "__TABLE_RESULT__":
+            # Join rows as lines for test assertion
+            lines = []
+            for row in result["rows"]:
+                lines.append(" | ".join(str(cell) for cell in row))
+            return "\n".join(lines)
+        return str(result)
+
+    # Alias for tool access
+    def show_orders_tool(self):
+        return self.show_orders 
