@@ -2,3 +2,4 @@ pydantic[email]>=1.10
 sqlalchemy>=1.4
 pytest
 prettytable
+rich
