@@ -28,6 +28,8 @@ def test_reset_overwrites_existing_db(tmp_path):
     tool.add_product('Widget', 9.99, 1)
     tool.add_product('Gadget', 19.99, 2)
     tool.add_product('Thingamajig', 14.99, 3)
+    # Close all connections before resetting
+    tool.engine.dispose()
     # Now reset
     reset_db(str(db_path))
     tool = ProductTool(db_path=str(db_path))
