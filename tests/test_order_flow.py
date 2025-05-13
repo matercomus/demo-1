@@ -1,13 +1,6 @@
 import pytest
 import os
 
-TEST_DB = "test_products.db"
-
-@pytest.fixture(autouse=True, scope="function")
-def clean_db():
-    if os.path.exists(TEST_DB):
-        os.remove(TEST_DB)
-
 from agent import MockAgent
 from models import Order, Product, OrderInput
 from tools import ProductTool, ProductDB, OrderDB
@@ -20,7 +13,7 @@ class MockUI(TerminalUI):
         self.outputs = []
     def prompt(self, message: str) -> str:
         return next(self.inputs)
-    def prompt_int(self, message: str, min_value: int = 1, max_value: int = 1000) -> int:
+    def prompt_int(self, message: str, min_value: int = 1, max_value = 1000) -> int:
         return int(next(self.inputs))
     def prompt_yes_no(self, message: str) -> bool:
         return next(self.inputs).lower() in ("y", "yes")
@@ -117,42 +110,42 @@ def test_orderinput_multiple_invalid():
     assert "payment_method" in msg and "cannot be empty" in msg
 
 # Agent flow tests
-def test_happy_path():
-    # Select product 1, quantity 2, confirm, then all valid fields
+def test_happy_path(tmp_path):
+    db_path = tmp_path / "test_products.db"
     inputs = [
         "1", "2", "y", "Alice", "+1 234-567-8901", "alice@example.com", "123 Main St", "Tomorrow", "card"
     ]
     ui = MockUI(inputs)
-    agent = MockAgent(ui=ui, db_path=TEST_DB)
+    agent = MockAgent(ui=ui, db_path=str(db_path))
     agent.start_order()
     assert any("Order completed successfully" in o for o in ui.outputs)
     assert any("Order: Widget x2" in o for o in ui.outputs)
 
-def test_out_of_stock():
-    # Select product 3 (out of stock), quantity 1
+def test_out_of_stock(tmp_path):
+    db_path = tmp_path / "test_products.db"
     inputs = ["3", "1"]
     ui = MockUI(inputs)
-    agent = MockAgent(ui=ui, db_path=TEST_DB)
+    agent = MockAgent(ui=ui, db_path=str(db_path))
     agent.start_order()
     assert any("Not enough stock" in o for o in ui.outputs)
 
-def test_agent_invalid_email_then_valid():
-    # Select product 1, quantity 1, confirm, then multiple invalid emails, then valid
+def test_agent_invalid_email_then_valid(tmp_path):
+    db_path = tmp_path / "test_products.db"
     inputs = [
         "1", "1", "y", "Bob", "1234567", "notanemail", "also@not", "bob@example.com", "Somewhere", "Soon", "cash"
     ]
     ui = _TestMockUI(inputs)
-    agent = MockAgent(ui=ui, db_path=TEST_DB)
+    agent = MockAgent(ui=ui, db_path=str(db_path))
     agent.start_order()
     # Should see Pydantic error for invalid email, then success
     assert any("value is not a valid email address" in o for o in ui.outputs)
     assert any("Order completed successfully" in o for o in ui.outputs)
 
-def test_order_persistence_and_stock():
-    # Place an order and check DB for order and stock update
+def test_order_persistence_and_stock(tmp_path):
+    db_path = tmp_path / "test_products.db"
     inputs = ["1", "2", "y", "Alice", "+1 234-567-8901", "alice@example.com", "123 Main St", "Tomorrow", "card"]
     ui = MockUI(inputs)
-    agent = MockAgent(ui=ui, db_path=TEST_DB)
+    agent = MockAgent(ui=ui, db_path=str(db_path))
     agent.start_order()
     # Check DB
     engine = agent.product_tool.engine
