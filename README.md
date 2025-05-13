@@ -23,7 +23,7 @@ cd demo-1
 
 ### 2. Python Version
 
-This project requires **Python >=3.8**.
+This project requires **Python >=3.11**
 
 ### 3. Install dependencies & Run (with uv)
 
