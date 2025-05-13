@@ -1,0 +1,5 @@
+pydantic>=1.10
+sqlalchemy>=1.4
+pytest
+prettytable
+# Add any other direct dependencies your code imports here 
