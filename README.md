@@ -1,3 +1,5 @@
+[![Pytest](https://github.com/matercomus/demo-1/actions/workflows/pytest.yml/badge.svg?branch=master)](https://github.com/matercomus/demo-1/actions/workflows/pytest.yml)
+
 # Demo 1 — Conversational Order System
 
 ## Overview
