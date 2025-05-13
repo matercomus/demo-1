@@ -22,3 +22,6 @@ jobs:
         run: pip install -r requirements-ci.txt
       - name: Run tests
         run: pytest -v 
+        env: 
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
