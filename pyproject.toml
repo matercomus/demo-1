@@ -3,7 +3,7 @@ name = "demo-1"
 version = "0.1.0"
 description = "Order dialogue demo with agent architecture"
 readme = "README.md"
-requires-python = ">=3.11
+requires-python = ">=3.11"
 dependencies = []
 
 [tool.poetry.dependencies]
