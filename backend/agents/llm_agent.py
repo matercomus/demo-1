@@ -101,9 +101,9 @@ class LLMAgent:
                     delivery_time=delivery_time,
                 )
                 # Show pending summary and ask for confirmation
-                ctx.deps.ui.print_pending_order_summary(order)
-                if not ctx.deps.ui.prompt_yes_no("Do you want to confirm and place this order?"):
-                    return "Order not confirmed. Cancelled by user."
+                # ctx.deps.ui.print_pending_order_summary(order)
+                # if not ctx.deps.ui.prompt_yes_no("Do you want to confirm and place this order?"):
+                    # return "Order not confirmed. Cancelled by user."
                 ctx.deps.orders_tool.decrement_stock(product.id, quantity)
                 order_id = ctx.deps.orders_tool.save_order(order, payment_method)
                 self.last_order_id = order_id  # Track last order ID
