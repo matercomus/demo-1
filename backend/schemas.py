@@ -12,8 +12,7 @@ class FamilyMemberCreate(FamilyMemberBase):
 
 class FamilyMemberRead(FamilyMemberBase):
     id: int
-    class Config:
-        orm_mode = True
+    model_config = dict(from_attributes=True)
 
 class ChoreBase(BaseModel):
     chore_name: str
@@ -31,8 +30,7 @@ class ChoreCreate(ChoreBase):
 
 class ChoreRead(ChoreBase):
     id: int
-    class Config:
-        orm_mode = True
+    model_config = dict(from_attributes=True)
 
 class MealBase(BaseModel):
     meal_name: str
@@ -46,5 +44,4 @@ class MealCreate(MealBase):
 
 class MealRead(MealBase):
     id: int
-    class Config:
-        orm_mode = True 
+    model_config = dict(from_attributes=True) 

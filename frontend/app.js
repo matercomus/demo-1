@@ -11,6 +11,13 @@ let chatMessages = [];
 let chatLoading = false;
 let chatError = '';
 
+if (typeof window !== 'undefined' && !window.marked) {
+  const script = document.createElement('script');
+  script.src = 'https://cdn.jsdelivr.net/npm/marked/marked.min.js';
+  script.onload = () => { window.marked = window.marked || marked; };
+  document.head.appendChild(script);
+}
+
 function renderTable(data, type) {
   if (!Array.isArray(data) || data.length === 0) {
     return `<div class="text-gray-500 text-center py-4">No ${type}s found.</div>`;
@@ -772,7 +779,7 @@ function renderChatUI() {
           chatMessages.map(m => `
             <div class="mb-2 flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}">
               <div class="max-w-xl px-3 py-2 rounded-lg shadow ${m.role === 'user' ? 'bg-blue-600 text-white' : 'bg-white border text-gray-800'}">
-                ${m.content}
+                ${m.role === 'bot' && window.marked ? window.marked.parse(m.content) : m.content}
               </div>
             </div>
           `).join('')
