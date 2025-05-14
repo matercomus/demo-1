@@ -20,4 +20,13 @@ def db_session(test_db_url):
         yield db
     finally:
         db.close()
-        Base.metadata.drop_all(bind=engine) 
+        Base.metadata.drop_all(bind=engine)
+
+@pytest.fixture(scope='session', autouse=True)
+def set_test_db_env(test_db_url):
+    os.environ['TEST_DB_URL'] = test_db_url
+    # Create all tables in the temp DB before any tests run
+    engine = get_engine(test_db_url)
+    Base.metadata.create_all(bind=engine)
+    yield
+    os.environ.pop('TEST_DB_URL', None) 
