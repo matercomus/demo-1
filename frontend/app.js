@@ -6,6 +6,11 @@ let currentData = {};
 let stepLoading = false;
 let stepError = '';
 
+// --- Chat UI State ---
+let chatMessages = [];
+let chatLoading = false;
+let chatError = '';
+
 function renderTable(data, type) {
   if (!Array.isArray(data) || data.length === 0) {
     return `<div class="text-gray-500 text-center py-4">No ${type}s found.</div>`;
@@ -31,19 +36,18 @@ function renderTable(data, type) {
   `;
 }
 
-function renderMenu() {
-  stepLoading = false;
-  stepError = '';
-  app.innerHTML = `
-    <div class="flex flex-col items-center gap-4">
-      <h1 class="text-2xl font-bold text-blue-700 mb-2">Smart Household Assistant</h1>
-      <div class="flex flex-wrap gap-3 justify-center">
-        <button class="px-4 py-2 bg-blue-600 text-white rounded shadow hover:bg-blue-700 transition" id="choreBtn">Create Chore</button>
-        <button class="px-4 py-2 bg-green-600 text-white rounded shadow hover:bg-green-700 transition" id="mealBtn">Plan Meal</button>
-        <button class="px-4 py-2 bg-indigo-600 text-white rounded shadow hover:bg-indigo-700 transition" id="viewChoresBtn">View All Chores</button>
-        <button class="px-4 py-2 bg-purple-600 text-white rounded shadow hover:bg-purple-700 transition" id="viewMealsBtn">View All Meals</button>
-        <button class="px-4 py-2 bg-pink-600 text-white rounded shadow hover:bg-pink-700 transition" id="editMembersBtn">Edit Family Members</button>
-      </div>
+// --- Render the top menu bar ---
+function renderMenuBar() {
+  const menuBar = document.getElementById('menuBar');
+  if (!menuBar) return;
+  menuBar.innerHTML = `
+    <h1 class="text-xl font-bold text-blue-700">Smart Household Assistant</h1>
+    <div class="flex flex-wrap gap-3 items-center">
+      <button class="px-4 py-2 bg-blue-600 text-white rounded shadow hover:bg-blue-700 transition" id="choreBtn">Create Chore</button>
+      <button class="px-4 py-2 bg-green-600 text-white rounded shadow hover:bg-green-700 transition" id="mealBtn">Plan Meal</button>
+      <button class="px-4 py-2 bg-indigo-600 text-white rounded shadow hover:bg-indigo-700 transition" id="viewChoresBtn">View All Chores</button>
+      <button class="px-4 py-2 bg-purple-600 text-white rounded shadow hover:bg-purple-700 transition" id="viewMealsBtn">View All Meals</button>
+      <button class="px-4 py-2 bg-pink-600 text-white rounded shadow hover:bg-pink-700 transition" id="editMembersBtn">Edit Family Members</button>
     </div>
   `;
   document.getElementById('choreBtn').onclick = () => startFlow('chore');
@@ -51,6 +55,23 @@ function renderMenu() {
   document.getElementById('viewChoresBtn').onclick = () => fetchAndShowList('chore');
   document.getElementById('viewMealsBtn').onclick = () => fetchAndShowList('meal');
   document.getElementById('editMembersBtn').onclick = renderEditMembers;
+}
+
+function renderMenu() {
+  stepLoading = false;
+  stepError = '';
+  // Render the menu bar at the top
+  renderMenuBar();
+  // Render the chat UI stretched to fill the main area
+  app.innerHTML = `
+    <div class="flex flex-col flex-1 h-full w-full items-center justify-center">
+      ${renderChatUI()}
+    </div>
+  `;
+  // Chat form handler
+  const chatForm = document.getElementById('chatForm');
+  if (chatForm) chatForm.onsubmit = handleChatSubmit;
+  scrollChatToBottom();
 }
 
 function startFlow(selectedMode) {
@@ -738,6 +759,76 @@ async function renderEditMembers() {
   members = await fetchMembers();
   loading = false;
   renderPage();
+}
+
+// --- Chat UI Functions ---
+function renderChatUI() {
+  // Chat container, now stretches more
+  const chatBox = `
+    <div class="flex flex-col flex-1 w-full max-w-3xl mx-auto h-[70vh] min-h-[400px]">
+      <h2 class="text-lg font-semibold text-gray-700 mb-2">🤖 Assistant Chat</h2>
+      <div id="chatHistory" class="flex-1 bg-gray-100 rounded-lg p-4 overflow-y-auto mb-2 border border-gray-200">
+        ${chatMessages.length === 0 ? '<div class="text-gray-400 text-center">No messages yet. Say hello!</div>' :
+          chatMessages.map(m => `
+            <div class="mb-2 flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}">
+              <div class="max-w-xl px-3 py-2 rounded-lg shadow ${m.role === 'user' ? 'bg-blue-600 text-white' : 'bg-white border text-gray-800'}">
+                ${m.content}
+              </div>
+            </div>
+          `).join('')
+        }
+        ${chatLoading ? '<div class="flex items-center gap-2 text-gray-500"><svg class="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path></svg> Assistant is typing...</div>' : ''}
+      </div>
+      <form id="chatForm" class="flex gap-2">
+        <input id="chatInput" class="flex-1 px-3 py-2 rounded border border-gray-300 focus:border-blue-500" type="text" placeholder="Type your message..." autocomplete="off" ${chatLoading ? 'disabled' : ''} />
+        <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded shadow hover:bg-blue-700 transition" ${chatLoading ? 'disabled' : ''}>Send</button>
+      </form>
+      ${chatError ? `<div class='text-red-600 mt-2'>${chatError}</div>` : ''}
+    </div>
+  `;
+  return chatBox;
+}
+
+function scrollChatToBottom() {
+  setTimeout(() => {
+    const el = document.getElementById('chatHistory');
+    if (el) el.scrollTop = el.scrollHeight;
+  }, 50);
+}
+
+function handleChatSubmit(e) {
+  e.preventDefault();
+  const input = document.getElementById('chatInput');
+  const msg = input.value.trim();
+  if (!msg || chatLoading) return;
+  input.value = '';
+  chatMessages.push({ role: 'user', content: msg });
+  chatLoading = true;
+  chatError = '';
+  renderMenu();
+  scrollChatToBottom();
+  // Send to backend
+  fetch('http://localhost:8000/chat/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: msg })
+  })
+    .then(res => res.json())
+    .then(data => {
+      if (data && data.reply) {
+        chatMessages.push({ role: 'bot', content: data.reply });
+      } else {
+        chatMessages.push({ role: 'bot', content: 'Sorry, I did not understand that.' });
+      }
+      chatLoading = false;
+      renderMenu();
+      scrollChatToBottom();
+    })
+    .catch(err => {
+      chatError = 'Error contacting assistant.';
+      chatLoading = false;
+      renderMenu();
+    });
 }
 
 // Initial render

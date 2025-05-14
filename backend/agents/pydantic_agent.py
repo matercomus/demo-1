@@ -1,6 +1,6 @@
-from models import Order, Product, RecipientInfo, OrderInput
-from tools import ProductTool, PaymentTool, OrdersTool
-from utils.ui import TerminalUI
+from backend.models import Order, Product, RecipientInfo, OrderInput
+from backend.tools import ProductTool, PaymentTool, OrdersTool
+from backend.utils.ui import TerminalUI
 from typing import Optional
 from pydantic import ValidationError
 

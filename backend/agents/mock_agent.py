@@ -1,4 +1,4 @@
-from models import Order, Product, RecipientInfo, OrderInput
+from backend.models import Order, Product, RecipientInfo, OrderInput
 from tools import ProductTool, PaymentTool, OrdersTool
 from utils.ui import TerminalUI
 from typing import Optional, Protocol

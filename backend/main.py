@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Request
 from typing import List, Optional, Dict, Any
 from backend.models import Chore, Meal, FamilyMember
 from pydantic import BaseModel, Field
@@ -11,6 +11,9 @@ from backend.logging_config import setup_logging
 from backend.database import Base, get_engine
 from sqlalchemy.orm import Session
 import traceback
+from fastapi.responses import JSONResponse
+from fastapi import Body
+from backend.agents.llm_agent import HouseholdAssistantAgent, AssistantDeps
 
 setup_logging()
 
@@ -35,6 +38,9 @@ members: List[FamilyMember] = []
 
 chore_id_counter = 1
 meal_id_counter = 1
+
+# Initialize the household assistant agent
+household_agent = HouseholdAssistantAgent()
 
 @app.get("/health")
 def health_check():
@@ -300,3 +306,12 @@ def meal_step(req: MealStepRequest, db: Session = Depends(get_db)):
         "message": "Meal created successfully!",
         "id": db_meal.id
     }
+
+@app.post("/chat/")
+async def chat_endpoint(data: dict = Body(...), db: Session = Depends(get_db)):
+    message = data.get("message", "")
+    try:
+        reply = await household_agent.agent.run(message, deps=AssistantDeps(db=db))
+        return JSONResponse({"reply": str(reply.output)})
+    except Exception as e:
+        return JSONResponse({"reply": f"Assistant error: {e}"})

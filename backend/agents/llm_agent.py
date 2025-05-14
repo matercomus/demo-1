@@ -1,292 +1,165 @@
-import asyncio
+import os
 from dataclasses import dataclass
-from models import Order, Product, RecipientInfo
-from tools import ProductTool, PaymentTool, OrdersTool, OrderDB, ProductDB
-from utils.ui import TerminalUI
 from typing import Optional
 from pydantic_ai import Agent
-from pydantic_ai.messages import (
-    FunctionToolCallEvent,
-)
 from pydantic_ai.tools import RunContext
-import os
 from dotenv import load_dotenv
-import sys
+from backend.crud import chore as chore_crud, meal as meal_crud, member as member_crud
+from backend.schemas import ChoreCreate, MealCreate, FamilyMemberCreate
+from backend.models import Chore, Meal, FamilyMember
 
 @dataclass
-class OrderService:
-    product_tool: ProductTool
-    payment_tool: PaymentTool
-    orders_tool: OrdersTool
-    ui: TerminalUI
+class AssistantDeps:
+    db: object  # SQLAlchemy session
 
-    async def save_order(self, order: Order, payment_method: str):
-        self.orders_tool.decrement_stock(order.product.id, order.quantity)
-        self.orders_tool.save_order(order, payment_method)
-
-class LLMAgent:
-    def __init__(self, ui: TerminalUI, db_path: str = 'products.db'):
+class HouseholdAssistantAgent:
+    def __init__(self):
         load_dotenv()
-        self.ui = ui
-        self.product_tool = ProductTool(db_path=db_path)
-        self.payment_tool = PaymentTool()
-        self.orders_tool = OrdersTool(self.product_tool.engine)
-        self.order_service = OrderService(
-            product_tool=self.product_tool,
-            payment_tool=self.payment_tool,
-            orders_tool=self.orders_tool,
-            ui=self.ui,
-        )
-        self.last_order_id = None  # Track last placed order in session
-        self.agent = Agent[OrderService, str](
+        self.agent = Agent[
+            AssistantDeps, str
+        ](
             os.getenv('OPENAI_MODEL', 'openai:gpt-4o'),
-            deps_type=OrderService,
+            deps_type=AssistantDeps,
             output_type=str,
             system_prompt=(
-                'You are an order assistant. To process an order, you must call the `place_order` tool with the following fields: '
-                'product_name, quantity, name, phone, email, address, delivery_time, payment_method.\n'
-                'To cancel any order, call the `cancel_order` tool with the order_id.\n'
-                'To show all orders, call the `show_orders` tool.\n'
-                'To end the conversation, call the `stop_chat` tool.\n'
-                'Do not claim to perform actions unless you call the corresponding tool.\n'
-                'If the user asks to cancel an order, ask for the order ID if not provided, and use the `cancel_order` tool.\n'
-                'If the user wants to stop, call the `stop_chat` tool.\n'
-                'After collecting the info, summarize the order and confirm with the user.\n'
-                'To actually place the order in the database, you must call the `place_order` tool.\n'
-                'Example tool calls:\n'
-                'place_order(product_name="Widget", quantity=2, name="John Doe", phone="123-456-7890", email="john@example.com", address="123 Main St", delivery_time="tomorrow 10am", payment_method="card")\n'
-                'cancel_order(order_id=3)\n'
-                'show_orders()\n'
-                'stop_chat()\n'
+                'You are a smart household assistant. You can help users manage chores, meals, and family members.\n'
+                'You have the following tools:\n'
+                '- create_chore(chore_name, assigned_members, start_date, repetition, due_time, reminder, type): create a new chore.\n'
+                '- list_chores(): list all chores.\n'
+                '- update_chore(id, ...): update a chore by ID.\n'
+                '- delete_chore(id): delete a chore by ID.\n'
+                '- create_meal(meal_name, exist, meal_kind, meal_date, dishes): create a new meal.\n'
+                '- list_meals(): list all meals.\n'
+                '- update_meal(id, ...): update a meal by ID.\n'
+                '- delete_meal(id): delete a meal by ID.\n'
+                '- create_member(name, gender, avatar): add a family member.\n'
+                '- list_members(): list all family members.\n'
+                '- update_member(id, ...): update a member by ID.\n'
+                '- delete_member(id): delete a member by ID.\n'
+                'Always use these tools to perform actions.\n'
+                'Summarize actions for the user.\n'
+                'If the user asks for help, explain what you can do.\n'
             ),
         )
         self._register_tools()
 
     def _register_tools(self):
         @self.agent.tool
-        async def place_order(
-            ctx: RunContext[OrderService],
-            product_name: str,
-            quantity: int,
-            name: str,
-            phone: str,
-            email: str,
-            address: str,
-            delivery_time: str,
-            payment_method: str,
-        ) -> str:
+        async def create_chore(ctx: RunContext[AssistantDeps], chore_name: str, assigned_members: list, start_date: str, repetition: str, due_time: Optional[str] = None, reminder: Optional[str] = None, type: Optional[str] = None):
+            db = ctx.deps.db
             try:
-                ctx.deps.ui.print_db_info("Placing new order in the database...")
-                products = ctx.deps.product_tool.list_products()
-                product = next((p for p in products if p.name.lower() == product_name.lower()), None)
-                if not product:
-                    return f"Error: Product '{product_name}' not found."
-                if quantity < 1:
-                    return "Error: Quantity must be at least 1."
-                if not ctx.deps.product_tool.check_stock(product, quantity):
-                    return f"Error: Not enough stock for '{product.name}'. Only {product.stock} left."
-                try:
-                    recipient = RecipientInfo(name=name, phone=phone, email=email)
-                except Exception as e:
-                    return f"Validation error in recipient info: {e}"
-                unit_price = ctx.deps.product_tool.get_price(product)
-                total_price = unit_price * quantity
-                order = Order(
-                    product=product,
-                    quantity=quantity,
-                    unit_price=unit_price,
-                    total_price=total_price,
-                    recipient_info=recipient,
-                    address=address,
-                    delivery_time=delivery_time,
+                chore = ChoreCreate(
+                    chore_name=chore_name,
+                    assigned_members=assigned_members,
+                    start_date=start_date,
+                    repetition=repetition,
+                    due_time=due_time or "23:59",
+                    reminder=reminder,
+                    type=type,
+                    icon=None
                 )
-                # Show pending summary and ask for confirmation
-                # ctx.deps.ui.print_pending_order_summary(order)
-                # if not ctx.deps.ui.prompt_yes_no("Do you want to confirm and place this order?"):
-                    # return "Order not confirmed. Cancelled by user."
-                ctx.deps.orders_tool.decrement_stock(product.id, quantity)
-                order_id = ctx.deps.orders_tool.save_order(order, payment_method)
-                self.last_order_id = order_id  # Track last order ID
-                ctx.deps.ui.print_confirmed_order(order)
-                return (
-                    f"Order placed successfully!\n"
-                    f"  Product: {product.name}\n"
-                    f"  Quantity: {quantity}\n"
-                    f"  Name: {name}\n"
-                    f"  Phone: {phone}\n"
-                    f"  Email: {email}\n"
-                    f"  Address: {address}\n"
-                    f"  Delivery Time: {delivery_time}\n"
-                    f"  Payment Method: {payment_method}\n"
-                    f"  Total Price: ${total_price:.2f}\n"
-                    "Thank you for your order!"
-                )
+                db_chore = chore_crud.create_chore(db, chore)
+                return f"Chore '{chore_name}' created with ID {db_chore.id}."
             except Exception as e:
-                return f"Order placement error: {e}"
-        self.place_order = place_order
+                return f"Error creating chore: {e}"
 
         @self.agent.tool
-        async def cancel_order(ctx: RunContext[OrderService], order_id: int) -> str:
-            ctx.deps.ui.print_db_info(f"Cancelling order {order_id} in the database...")
-            # Confirm cancellation
-            ctx.deps.ui.print_cancel_confirmation(order_id)
-            if not ctx.deps.ui.prompt_yes_no(f"Are you sure you want to cancel order {order_id}?"):
-                return f"Cancellation of order {order_id} aborted by user."
-            session = ctx.deps.orders_tool.Session()
-            order_db = session.query(OrderDB).filter_by(id=order_id).first()
-            if not order_db:
-                session.close()
-                return f"Order with ID {order_id} not found."
-            # Restore stock
-            product_db = session.query(ProductDB).filter_by(id=order_db.product_id).first()
-            if product_db:
-                product_db.stock += order_db.quantity
-            session.delete(order_db)
-            session.commit()
-            session.close()
-            # If the cancelled order was the last_order_id, clear it
-            if self.last_order_id == order_id:
-                self.last_order_id = None
-            ctx.deps.ui.print_cancelled_order(order_id)
-            return f"Order {order_id} cancelled and removed from the database."
-        self.cancel_order = cancel_order
+        async def list_chores(ctx: RunContext[AssistantDeps]):
+            db = ctx.deps.db
+            chores = chore_crud.get_chores(db)
+            if not chores:
+                return "No chores found."
+            return "Chores:\n" + "\n".join(f"[{c.id}] {c.chore_name} (assigned: {c.assigned_members})" for c in chores)
 
         @self.agent.tool
-        async def list_products(ctx: RunContext[OrderService]):
-            ctx.deps.ui.print_db_info("Fetching product list from the database...")
-            products = ctx.deps.product_tool.list_products()
-            if not products:
-                return "No products are currently available."
-            columns = ["#", "Name", "Price", "Stock"]
-            rows = []
-            for idx, p in enumerate(products, 1):
-                stock_str = str(p.stock) if p.stock > 0 else "OUT OF STOCK"
-                rows.append([str(idx), p.name, f"${p.price:.2f}", stock_str])
-            rows.append(["0", "Cancel", "", ""])
-            return {
-                "type": "__TABLE_RESULT__",
-                "title": "Available Products",
-                "columns": columns,
-                "rows": rows,
-                "message": "Please select a product by number."
-            }
+        async def update_chore(ctx: RunContext[AssistantDeps], id: int, **kwargs):
+            db = ctx.deps.db
+            c = chore_crud.get_chore(db, id)
+            if not c:
+                return f"Chore with ID {id} not found."
+            data = {k: kwargs[k] for k in kwargs if k in ChoreCreate.__fields__}
+            chore = ChoreCreate(**{**c.__dict__, **data})
+            updated = chore_crud.update_chore(db, id, chore)
+            return f"Chore {id} updated."
 
         @self.agent.tool
-        async def show_orders(ctx: RunContext[OrderService]):
-            ctx.deps.ui.print_db_info("Fetching orders from the database...")
-            orders = ctx.deps.orders_tool.show_orders()
-            if not orders:
-                return "No orders found."
-            columns = ["ID", "Product", "Qty", "Total", "Recipient", "Address", "Delivery Time", "Payment"]
-            rows = []
-            for o in orders:
-                rows.append([
-                    str(o.get('id', '')),
-                    o.get('product_name', ''),
-                    str(o.get('quantity', '')),
-                    f"${o.get('total_price', 0):.2f}",
-                    f"{o.get('recipient_name', '')} ({o.get('recipient_email', '')}, {o.get('recipient_phone', '')})",
-                    o.get('address', ''),
-                    o.get('delivery_time', ''),
-                    o.get('payment_method', '')
-                ])
-            # Add info panel for DB orders
-            ctx.deps.ui.print_info("These are confirmed orders from the database.")
-            return {
-                "type": "__TABLE_RESULT__",
-                "title": "Orders",
-                "columns": columns,
-                "rows": rows,
-                "message": "Here are your orders."
-            }
-        self.show_orders_tool = show_orders
+        async def delete_chore(ctx: RunContext[AssistantDeps], id: int):
+            db = ctx.deps.db
+            ok = chore_crud.delete_chore(db, id)
+            return f"Chore {id} deleted." if ok else f"Chore {id} not found."
 
         @self.agent.tool
-        async def stop_chat(ctx: RunContext[OrderService]) -> str:
-            return "Conversation ended. Thank you for visiting!"
-        self.stop_chat = stop_chat
+        async def create_meal(ctx: RunContext[AssistantDeps], meal_name: str, exist: bool, meal_kind: str, meal_date: str, dishes: Optional[list] = None):
+            db = ctx.deps.db
+            try:
+                meal = MealCreate(
+                    meal_name=meal_name,
+                    exist=exist,
+                    meal_kind=meal_kind,
+                    meal_date=meal_date,
+                    dishes=dishes or []
+                )
+                db_meal = meal_crud.create_meal(db, meal)
+                return f"Meal '{meal_name}' created with ID {db_meal.id}."
+            except Exception as e:
+                return f"Error creating meal: {e}"
 
         @self.agent.tool
-        async def stock_info(ctx: RunContext[OrderService]):
-            ctx.deps.ui.print_db_info("Fetching product stock from the database...")
-            products = ctx.deps.product_tool.list_products()
-            if not products:
-                return "No products are currently available."
-            columns = ["#", "Name", "Stock"]
-            rows = []
-            for idx, p in enumerate(products, 1):
-                stock_str = str(p.stock) if p.stock > 0 else "OUT OF STOCK"
-                rows.append([str(idx), p.name, stock_str])
-            return {
-                "type": "__TABLE_RESULT__",
-                "title": "Product Stock Information",
-                "columns": columns,
-                "rows": rows,
-                "message": "Here is the stock information for available products."
-            }
+        async def list_meals(ctx: RunContext[AssistantDeps]):
+            db = ctx.deps.db
+            meals = meal_crud.get_meals(db)
+            if not meals:
+                return "No meals found."
+            return "Meals:\n" + "\n".join(f"[{m.id}] {m.meal_name} ({m.meal_kind})" for m in meals)
 
-    def start_order(self):
-        asyncio.run(self._start_order_async())
+        @self.agent.tool
+        async def update_meal(ctx: RunContext[AssistantDeps], id: int, **kwargs):
+            db = ctx.deps.db
+            m = meal_crud.get_meal(db, id)
+            if not m:
+                return f"Meal with ID {id} not found."
+            data = {k: kwargs[k] for k in kwargs if k in MealCreate.__fields__}
+            meal = MealCreate(**{**m.__dict__, **data})
+            updated = meal_crud.update_meal(db, id, meal)
+            return f"Meal {id} updated."
 
-    async def _start_order_async(self):
-        self.ui.print_section('Start New Order (LLM-powered, tool-based)')
-        initial_prompt = (
-            "Welcome to the order system! You can order any available product. "
-            "Please tell me what you'd like to order, and I'll guide you through the process."
-        )
-        message_history = None
-        user_input = initial_prompt
-        while True:
-            result = await self.agent.run(
-                user_input,
-                deps=self.order_service,
-                message_history=message_history
-            )
-            # Check if the LLM called stop_chat tool in this turn
-            stop = False
-            for msg in result.new_messages():
-                if isinstance(msg, FunctionToolCallEvent):
-                    if getattr(msg.part, 'tool_name', None) == 'stop_chat':
-                        stop = True
-                        break
-            if stop:
-                # Print the exact shutdown message for test compatibility and show in the assistant bubble
-                msg = "Conversation ended by LLM via stop_chat tool."
-                print(msg)
-                self.ui.print_agent_response(msg)
-                sys.exit(0)
-            if result.output:
-                output = result.output
-                if isinstance(output, dict) and output.get("type") == "__TABLE_RESULT__":
-                    table = self.ui.build_table_message(output["columns"], output["rows"], title=output.get("title"))
-                    msg = output.get("message", "")
-                    self.ui.print_agent_response([table, msg] if msg else [table])
-                else:
-                    self.ui.print_agent_response(str(output))
-            message_history = result.all_messages()
-            user_input = self.ui.prompt("Your response:")
-            self.ui.print_user_response(user_input)
+        @self.agent.tool
+        async def delete_meal(ctx: RunContext[AssistantDeps], id: int):
+            db = ctx.deps.db
+            ok = meal_crud.delete_meal(db, id)
+            return f"Meal {id} deleted." if ok else f"Meal {id} not found."
 
-    def _select_product(self) -> Optional[Product]:
-        products = self.product_tool.list_products()
-        self.ui.print_products(products)
-        idx = self.ui.prompt_int('Select product by number (0 to cancel):', min_value=0, max_value=len(products))
-        if idx == 0:
-            return None
-        return products[idx-1]
+        @self.agent.tool
+        async def create_member(ctx: RunContext[AssistantDeps], name: str, gender: Optional[str] = None, avatar: Optional[str] = None):
+            db = ctx.deps.db
+            try:
+                member = FamilyMemberCreate(name=name, gender=gender, avatar=avatar)
+                db_member = member_crud.create_member(db, member)
+                return f"Member '{name}' created with ID {db_member.id}."
+            except Exception as e:
+                return f"Error creating member: {e}"
 
-    async def show_orders(self, ctx):
-        # For test compatibility: call the show_orders tool and return a string summary
-        result = await self.show_orders_tool(ctx)
-        # If result is a table dict, return a simple string for test assertion
-        if isinstance(result, dict) and result.get("type") == "__TABLE_RESULT__":
-            # Join rows as lines for test assertion
-            lines = []
-            for row in result["rows"]:
-                lines.append(" | ".join(str(cell) for cell in row))
-            return "\n".join(lines)
-        return str(result)
+        @self.agent.tool
+        async def list_members(ctx: RunContext[AssistantDeps]):
+            db = ctx.deps.db
+            members = member_crud.get_members(db)
+            if not members:
+                return "No family members found."
+            return "Members:\n" + "\n".join(f"[{m.id}] {m.name} ({m.gender})" for m in members)
 
-    # Alias for tool access
-    def show_orders_tool(self):
-        return self.show_orders 
+        @self.agent.tool
+        async def update_member(ctx: RunContext[AssistantDeps], id: int, **kwargs):
+            db = ctx.deps.db
+            m = member_crud.get_member(db, id)
+            if not m:
+                return f"Member with ID {id} not found."
+            data = {k: kwargs[k] for k in kwargs if k in FamilyMemberCreate.__fields__}
+            member = FamilyMemberCreate(**{**m.__dict__, **data})
+            updated = member_crud.update_member(db, id, member)
+            return f"Member {id} updated."
+
+        @self.agent.tool
+        async def delete_member(ctx: RunContext[AssistantDeps], id: int):
+            db = ctx.deps.db
+            ok = member_crud.delete_member(db, id)
+            return f"Member {id} deleted." if ok else f"Member {id} not found."
