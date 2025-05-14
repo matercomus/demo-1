@@ -54,14 +54,18 @@ function renderMenuBar() {
       <button class="px-4 py-2 bg-green-600 text-white rounded shadow hover:bg-green-700 transition" id="mealBtn">Plan Meal</button>
       <button class="px-4 py-2 bg-indigo-600 text-white rounded shadow hover:bg-indigo-700 transition" id="viewChoresBtn">View All Chores</button>
       <button class="px-4 py-2 bg-purple-600 text-white rounded shadow hover:bg-purple-700 transition" id="viewMealsBtn">View All Meals</button>
+      <button class="px-4 py-2 bg-yellow-600 text-white rounded shadow hover:bg-yellow-700 transition" id="viewRecipesBtn">View Recipes</button>
       <button class="px-4 py-2 bg-pink-600 text-white rounded shadow hover:bg-pink-700 transition" id="editMembersBtn">Edit Family Members</button>
+      <button class="px-4 py-2 bg-orange-600 text-white rounded shadow hover:bg-orange-700 transition" id="createRecipeBtn">Create Recipe</button>
     </div>
   `;
   document.getElementById('choreBtn').onclick = () => startFlow('chore');
   document.getElementById('mealBtn').onclick = () => startFlow('meal');
   document.getElementById('viewChoresBtn').onclick = () => fetchAndShowList('chore');
   document.getElementById('viewMealsBtn').onclick = () => fetchAndShowList('meal');
+  document.getElementById('viewRecipesBtn').onclick = () => fetchAndShowList('recipe');
   document.getElementById('editMembersBtn').onclick = renderEditMembers;
+  document.getElementById('createRecipeBtn').onclick = renderCreateRecipe;
 }
 
 function renderMenu() {
@@ -135,12 +139,12 @@ function getDisabledAttrs(loading) {
   return loading ? "disabled style='opacity:0.5;cursor:not-allowed;pointer-events:none;'" : '';
 }
 
-async function step(userInput = null, confirm = false) {
+// Patch step to store lastStepData for suggestions
+let step = async function(userInput = null, confirm = false) {
   const endpoint = mode === 'chore' ? '/chore/step' : '/meal/step';
   const payload = { current_data: currentData };
   if (userInput) payload.user_input = userInput;
   if (confirm) payload.confirm = true;
-
   stepLoading = true;
   stepError = '';
   renderStepStage();
@@ -152,6 +156,7 @@ async function step(userInput = null, confirm = false) {
     });
     if (!res.ok) throw new Error('Failed to communicate with server.');
     const data = await res.json();
+    window.lastStepData = data;
     stage = data.stage;
     if (stage === 'collecting_info') {
       currentData = data.current_data;
@@ -173,7 +178,7 @@ async function step(userInput = null, confirm = false) {
     stepLoading = false;
     renderStepStage();
   }
-}
+};
 
 function renderStepStage() {
   // Show loading or error for step-based flows
@@ -206,22 +211,112 @@ function renderSummaryCard(summary, mode) {
   `;
 }
 
-function renderStageCard(content, stage) {
-  // Use different accent colors for each stage
-  let accent = '';
-  if (stage === 'collecting_info') accent = 'border-blue-300 bg-blue-50';
-  else if (stage === 'confirming_info') accent = 'border-yellow-300 bg-yellow-50';
-  else if (stage === 'created') accent = 'border-green-400 bg-green-50';
-  else accent = 'border-gray-200 bg-white';
-  return `<div class="max-w-md mx-auto rounded-lg shadow p-6 border ${accent}">${content}</div>`;
+function renderStageCard(content, stage, stepInfo = null) {
+  // Use different accent colors and icons for each stage
+  let accent = '', icon = '', border = '', progress = '';
+  if (stage === 'collecting_info') {
+    accent = 'border-blue-300 bg-blue-50';
+    icon = '📝';
+    border = 'border-blue-400';
+    if (stepInfo) {
+      progress = `<div class="mb-2 text-xs text-blue-700 font-semibold">Step ${stepInfo.current} of ${stepInfo.total}</div>`;
+    }
+  } else if (stage === 'confirming_info') {
+    accent = 'border-yellow-300 bg-yellow-50';
+    icon = '✅';
+    border = 'border-yellow-400';
+    if (stepInfo) {
+      progress = `<div class="mb-2 text-xs text-yellow-700 font-semibold">Confirmation</div>`;
+    }
+  } else if (stage === 'created') {
+    accent = 'border-green-400 bg-green-50';
+    icon = '🎉';
+    border = 'border-green-500';
+    progress = `<div class="mb-2 text-xs text-green-700 font-semibold">Success</div>`;
+  } else {
+    accent = 'border-gray-200 bg-white';
+    icon = '';
+    border = 'border-gray-300';
+  }
+  // Fade-in animation
+  return `<div class="max-w-md mx-auto rounded-lg shadow p-6 border ${accent} ${border} animate-fadein" style="animation: fadein 0.5s;">
+    ${icon ? `<div class="text-3xl mb-2">${icon}</div>` : ''}
+    ${progress}
+    ${content}
+  </div>`;
 }
+
+// Add fade-in animation CSS
+const style = document.createElement('style');
+style.innerHTML = `@keyframes fadein { from { opacity: 0; transform: translateY(20px);} to { opacity: 1; transform: none; } }
+.animate-fadein { animation: fadein 0.5s; }`;
+document.head.appendChild(style);
 
 function renderCollecting(missingFields, prompt) {
   let field = missingFields[0];
-  if (mode === 'meal' && field === 'exist') {
-    step({ exist: true });
+  if (mode === 'meal' && field === 'exist' && window.lastStepData && window.lastStepData.suggested_recipes) {
+    // Show recipe suggestions
+    const suggestions = window.lastStepData.suggested_recipes;
+    let suggestionHtml = '';
+    if (suggestions.length > 0) {
+      suggestionHtml = `
+        <div class="mb-4 p-3 bg-yellow-50 border border-yellow-300 rounded">
+          <div class="font-semibold text-yellow-800 mb-2">Did you mean one of these recipes?</div>
+          <ul class="space-y-2">
+            ${suggestions.map((r, i) => `
+              <li>
+                <button class="px-3 py-2 bg-yellow-200 hover:bg-yellow-300 rounded w-full text-left" data-suggest="${i}">
+                  <span class="font-bold">${r.name}</span> <span class="text-xs text-gray-600">(${r.kind})</span><br/>
+                  <span class="text-gray-700">${r.description || ''}</span>
+                </button>
+              </li>
+            `).join('')}
+          </ul>
+          <button class="mt-3 px-3 py-2 bg-gray-200 hover:bg-gray-300 rounded w-full" id="noRecipeMatchBtn">None of these</button>
+        </div>
+      `;
+    }
+    app.innerHTML = renderStageCard(`
+      <h2 class="text-xl font-semibold text-green-700 mb-4">Plan Meal</h2>
+      <div class="mb-2">${prompt}</div>
+      ${suggestionHtml}
+      <form id="stepForm" class="space-y-4">
+        ${renderField(field, mode, currentData[field] || "")}
+        <div class="flex gap-3 mt-4">
+          <button type="submit" class="px-4 py-2 bg-green-600 text-white rounded shadow hover:bg-green-700 transition" ${getDisabledAttrs(stepLoading)}>Next</button>
+          <button type="button" class="px-4 py-2 bg-gray-400 text-white rounded shadow hover:bg-gray-600 transition" id="cancelBtn" ${getDisabledAttrs(stepLoading)}>Cancel</button>
+        </div>
+      </form>
+    `, 'collecting_info');
+    // Suggestion click handlers
+    suggestions.forEach((r, i) => {
+      const btn = document.querySelector(`[data-suggest="${i}"]`);
+      if (btn) btn.onclick = () => {
+        currentData.meal_name = r.name;
+        currentData.exist = true;
+        step({ exist: true });
+      };
+    });
+    const noBtn = document.getElementById('noRecipeMatchBtn');
+    if (noBtn) noBtn.onclick = () => {
+      currentData.exist = false;
+      step({ exist: false });
+    };
+    document.getElementById('stepForm').onsubmit = (e) => {
+      e.preventDefault();
+      let val = document.getElementById('fieldInput').value;
+      let userInput = {};
+      userInput[field] = val;
+      step(userInput);
+    };
+    document.getElementById('cancelBtn').onclick = () => {
+      stepLoading = false;
+      stepError = '';
+      renderMenu();
+    };
     return;
   }
+  // fallback to default
   let value = currentData[field] || "";
   const content = `
     <h2 class="text-xl font-semibold text-blue-700 mb-4">${mode === 'chore' ? 'Create Chore' : 'Plan Meal'}</h2>
@@ -481,12 +576,22 @@ function renderCreated(message, id) {
 async function fetchAndShowList(listMode) {
   stepLoading = false;
   stepError = '';
-  const endpoint = listMode === 'chore' ? '/chores' : '/meals';
+  let endpoint, label;
+  if (listMode === 'chore') {
+    endpoint = '/chores';
+    label = 'Chores';
+  } else if (listMode === 'meal') {
+    endpoint = '/meals';
+    label = 'Meals';
+  } else if (listMode === 'recipe') {
+    endpoint = '/recipes';
+    label = 'Recipes';
+  }
   const res = await fetch(`http://localhost:8000${endpoint}`);
   const data = await res.json();
   app.innerHTML = `
-    <h2 class="text-xl font-semibold text-blue-700 mb-4">All ${listMode === 'chore' ? 'Chores' : 'Meals'}</h2>
-    ${renderTable(data, listMode === 'chore' ? 'chore' : 'meal')}
+    <h2 class="text-xl font-semibold text-blue-700 mb-4">All ${label}</h2>
+    ${renderTable(data, label.toLowerCase())}
     <div class="mt-6 flex justify-center">
       <button class="px-4 py-2 bg-gray-400 text-white rounded shadow hover:bg-gray-600 transition" id="backBtn">Back to Menu</button>
     </div>
@@ -621,15 +726,6 @@ async function renderEditMembers() {
         </div>
       </div>
     `;
-  }
-
-  function renderStageCard(content, stage) {
-    let accent = '';
-    if (stage === 'collecting_info') accent = 'border-pink-300 bg-pink-50';
-    else if (stage === 'confirming_info') accent = 'border-yellow-300 bg-yellow-50';
-    else if (stage === 'created') accent = 'border-green-400 bg-green-50';
-    else accent = 'border-gray-200 bg-white';
-    return `<div class="max-w-lg mx-auto rounded-lg shadow p-6 border ${accent}">${content}</div>`;
   }
 
   function renderPage() {
@@ -778,9 +874,7 @@ function renderChatUI() {
         ${chatMessages.length === 0 ? '<div class="text-gray-400 text-center">No messages yet. Say hello!</div>' :
           chatMessages.map(m => `
             <div class="mb-2 flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}">
-              <div class="max-w-xl px-3 py-2 rounded-lg shadow ${m.role === 'user' ? 'bg-blue-600 text-white' : 'bg-white border text-gray-800'}">
-                ${m.role === 'bot' && window.marked ? window.marked.parse(m.content) : m.content}
-              </div>
+              ${m.role === 'bot' ? renderChatBotMessage(m.content) : `<div class="max-w-xl px-3 py-2 rounded-lg shadow bg-blue-600 text-white">${m.content}</div>`}
             </div>
           `).join('')
         }
@@ -794,6 +888,25 @@ function renderChatUI() {
     </div>
   `;
   return chatBox;
+}
+
+function renderChatBotMessage(content) {
+  // Detect stage marker
+  let stage = null;
+  let msg = content;
+  const stageMatch = msg.match(/^<!-- stage: (\w+) -->/);
+  if (stageMatch) {
+    stage = stageMatch[1];
+    msg = msg.replace(/^<!-- stage: (\w+) -->/, '').trim();
+  }
+  // Try to extract step/progress info if present (future extensibility)
+  let stepInfo = null;
+  // Optionally, parse for step/progress info here if you add it to the backend
+  if (stage) {
+    return renderStageCard(window.marked ? window.marked.parse(msg) : msg, stage, stepInfo);
+  }
+  // Fallback: normal chat bubble
+  return `<div class="max-w-xl px-3 py-2 rounded-lg shadow bg-white border text-gray-800">${window.marked ? window.marked.parse(msg) : msg}</div>`;
 }
 
 function scrollChatToBottom() {
@@ -836,6 +949,51 @@ function handleChatSubmit(e) {
       chatLoading = false;
       renderMenu();
     });
+}
+
+function renderCreateRecipe() {
+  app.innerHTML = `
+    <div class="max-w-md mx-auto rounded-lg shadow p-6 border border-yellow-300 bg-yellow-50">
+      <h2 class="text-xl font-semibold text-yellow-700 mb-4">Create Recipe</h2>
+      <form id="createRecipeForm" class="space-y-4">
+        <label class="block mb-2 font-medium">Name
+          <input id="recipeName" class="mt-1 block w-full rounded border-gray-300 shadow-sm focus:border-yellow-500 focus:ring focus:ring-yellow-200 focus:ring-opacity-50 px-3 py-2" type="text" placeholder="Recipe name..." required />
+        </label>
+        <label class="block mb-2 font-medium">Kind
+          <select id="recipeKind" class="mt-1 block w-full rounded border-gray-300 shadow-sm focus:border-yellow-500 focus:ring focus:ring-yellow-200 focus:ring-opacity-50 px-3 py-2">
+            <option value="breakfast">Breakfast</option>
+            <option value="lunch">Lunch</option>
+            <option value="dinner">Dinner</option>
+            <option value="snack">Snack</option>
+          </select>
+        </label>
+        <label class="block mb-2 font-medium">Description
+          <textarea id="recipeDescription" class="mt-1 block w-full rounded border-gray-300 shadow-sm focus:border-yellow-500 focus:ring focus:ring-yellow-200 focus:ring-opacity-50 px-3 py-2" placeholder="Description..."></textarea>
+        </label>
+        <div class="flex gap-3 mt-4">
+          <button type="submit" class="px-4 py-2 bg-yellow-600 text-white rounded shadow hover:bg-yellow-700 transition">Create</button>
+          <button type="button" class="px-4 py-2 bg-gray-400 text-white rounded shadow hover:bg-gray-600 transition" id="cancelBtn">Cancel</button>
+        </div>
+      </form>
+    </div>
+  `;
+  document.getElementById('createRecipeForm').onsubmit = async (e) => {
+    e.preventDefault();
+    const name = document.getElementById('recipeName').value;
+    const kind = document.getElementById('recipeKind').value;
+    const description = document.getElementById('recipeDescription').value;
+    const res = await fetch('http://localhost:8000/recipes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, kind, description })
+    });
+    if (res.ok) {
+      fetchAndShowList('recipe');
+    } else {
+      alert('Failed to create recipe.');
+    }
+  };
+  document.getElementById('cancelBtn').onclick = renderMenu;
 }
 
 // Initial render

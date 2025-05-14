@@ -44,4 +44,16 @@ class MealCreate(MealBase):
 
 class MealRead(MealBase):
     id: int
+    model_config = dict(from_attributes=True)
+
+class RecipeBase(BaseModel):
+    name: str
+    kind: str
+    description: Optional[str] = None
+
+class RecipeCreate(RecipeBase):
+    pass
+
+class RecipeRead(RecipeBase):
+    id: int
     model_config = dict(from_attributes=True) 

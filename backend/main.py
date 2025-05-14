@@ -4,8 +4,8 @@ from backend.models import Chore, Meal, FamilyMember
 from pydantic import BaseModel, Field
 from datetime import date
 from fastapi.middleware.cors import CORSMiddleware
-from backend.schemas import ChoreCreate, ChoreRead, MealCreate, MealRead, FamilyMemberCreate, FamilyMemberRead
-from backend.crud import chore as chore_crud, meal as meal_crud, member as member_crud
+from backend.schemas import ChoreCreate, ChoreRead, MealCreate, MealRead, FamilyMemberCreate, FamilyMemberRead, RecipeCreate, RecipeRead
+from backend.crud import chore as chore_crud, meal as meal_crud, member as member_crud, recipe as recipe_crud
 from backend.deps import get_db
 from backend.logging_config import setup_logging
 from backend.database import Base, get_engine
@@ -139,6 +139,34 @@ def delete_member(member_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Member not found")
     return {"detail": "Member deleted"}
 
+# Recipe endpoints
+@app.post("/recipes", response_model=RecipeRead)
+def create_recipe(recipe: RecipeCreate, db: Session = Depends(get_db)):
+    db_recipe = recipe_crud.create_recipe(db, recipe)
+    return db_recipe
+
+@app.get("/recipes", response_model=List[RecipeRead])
+def list_recipes(db: Session = Depends(get_db)):
+    return recipe_crud.get_recipes(db)
+
+@app.get("/recipes/{recipe_id}", response_model=RecipeRead)
+def get_recipe(recipe_id: int, db: Session = Depends(get_db)):
+    r = recipe_crud.get_recipe(db, recipe_id)
+    if not r:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    return r
+
+@app.get("/recipes/search", response_model=List[RecipeRead])
+def search_recipes(q: str, db: Session = Depends(get_db)):
+    return recipe_crud.search_recipes(db, q)
+
+@app.delete("/recipes/{recipe_id}", response_model=dict)
+def delete_recipe(recipe_id: int, db: Session = Depends(get_db)):
+    ok = recipe_crud.delete_recipe(db, recipe_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    return {"detail": "Recipe deleted"}
+
 # Helper functions to convert ORM to Pydantic response
 
 def _chore_orm_to_read(orm):
@@ -255,6 +283,26 @@ def meal_step(req: MealStepRequest, db: Session = Depends(get_db)):
     if req.user_input:
         data.update(req.user_input)
 
+    # Fuzzy recipe matching: if meal_name is present and exist is not set, suggest recipes
+    if data.get("meal_name") and "exist" not in data:
+        matches = recipe_crud.search_recipes(db, data["meal_name"])
+        if matches:
+            return {
+                "stage": "collecting_info",
+                "prompt": f"Found similar recipes: {[r.name for r in matches]}. Is your meal one of these? (true/false)",
+                "missing_fields": ["exist"],
+                "current_data": data,
+                "suggested_recipes": [RecipeRead.model_validate(r) for r in matches],
+            }
+        else:
+            return {
+                "stage": "collecting_info",
+                "prompt": "No similar recipes found. Is this a new meal? (true/false)",
+                "missing_fields": ["exist"],
+                "current_data": data,
+                "suggested_recipes": [],
+            }
+
     missing = [f for f in REQUIRED_MEAL_FIELDS if data.get(f) in (None, "")]
     if missing:
         prompt_map = {
@@ -312,6 +360,19 @@ async def chat_endpoint(data: dict = Body(...), db: Session = Depends(get_db)):
     message = data.get("message", "")
     try:
         reply = await household_agent.agent.run(message, deps=AssistantDeps(db=db))
-        return JSONResponse({"reply": str(reply.output)})
+        output = str(reply.output).strip() if hasattr(reply, 'output') else str(reply).strip()
+        if not output or output.lower() in {"none", "", "null"}:
+            # Fallback response
+            return JSONResponse({"reply": (
+                "<!-- stage: collecting_info -->\n"
+                "🤖 **I need a bit more information to help you!**\n\n"
+                "Here are some things I can help with:\n"
+                "- 🧹 *Create a chore*: `Create a chore called Laundry for Alex starting tomorrow repeating weekly.`\n"
+                "- 🍽️ *Plan a meal*: `Plan a meal called Pasta for dinner tomorrow.`\n"
+                "- 👤 *Add a family member*: `Add a family member named Jamie, gender other.`\n"
+                "- 🍲 *Add a recipe*: `Add a recipe called Mapo Tofu for dinner.`\n\n"
+                "**What would you like to do?** Please provide more details, or try one of the example prompts above."
+            )})
+        return JSONResponse({"reply": output})
     except Exception as e:
         return JSONResponse({"reply": f"Assistant error: {e}"})

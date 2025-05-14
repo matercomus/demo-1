@@ -57,3 +57,10 @@ class FamilyMemberORM(Base):
     name = Column(String, nullable=False)
     gender = Column(String, nullable=True)
     avatar = Column(String, nullable=True)
+
+class RecipeORM(Base):
+    __tablename__ = "recipes"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    kind = Column(String, nullable=False)
+    description = Column(String, nullable=True)

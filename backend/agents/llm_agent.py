@@ -4,8 +4,8 @@ from typing import Optional
 from pydantic_ai import Agent
 from pydantic_ai.tools import RunContext
 from dotenv import load_dotenv
-from backend.crud import chore as chore_crud, meal as meal_crud, member as member_crud
-from backend.schemas import ChoreCreate, MealCreate, FamilyMemberCreate
+from backend.crud import chore as chore_crud, meal as meal_crud, member as member_crud, recipe as recipe_crud
+from backend.schemas import ChoreCreate, MealCreate, FamilyMemberCreate, RecipeCreate
 from backend.models import Chore, Meal, FamilyMember
 
 @dataclass
@@ -22,31 +22,61 @@ class HouseholdAssistantAgent:
             deps_type=AssistantDeps,
             output_type=str,
             system_prompt=(
-                'You are a smart household assistant. You can help users manage chores, meals, and family members.\n'
-                'You have the following tools:\n'
-                '- create_chore(chore_name, assigned_members, start_date, repetition, due_time, reminder, type): create a new chore.\n'
+                'You are a smart household assistant. You can manage chores, meals, family members, and recipes. '
+                'You have access to the following tools and should use them directly whenever the user requests a change, including renaming or updating any field. '
+                'For example, if the user says "rename chore 1 to Updated Chore", call update_chore(id=1, chore_name="Updated Chore").\n'
+                'Tools:\n'
+                '- create_chore(...): create a new chore.\n'
                 '- list_chores(): list all chores.\n'
-                '- update_chore(id, ...): update a chore by ID.\n'
+                '- update_chore(id, ...): update any field of a chore by ID, including the name. Example: update_chore(id=1, chore_name="Updated Chore").\n'
                 '- delete_chore(id): delete a chore by ID.\n'
-                '- create_meal(meal_name, exist, meal_kind, meal_date, dishes): create a new meal.\n'
+                '- create_meal(...): create a new meal.\n'
                 '- list_meals(): list all meals.\n'
-                '- update_meal(id, ...): update a meal by ID.\n'
+                '- update_meal(id, ...): update any field of a meal by ID.\n'
                 '- delete_meal(id): delete a meal by ID.\n'
-                '- create_member(name, gender, avatar): add a family member.\n'
+                '- create_member(...): add a family member.\n'
                 '- list_members(): list all family members.\n'
-                '- update_member(id, ...): update a member by ID.\n'
+                '- update_member(id, ...): update any field of a member by ID.\n'
                 '- delete_member(id): delete a member by ID.\n'
-                'Always use these tools to perform actions.\n'
-                'Summarize actions for the user.\n'
-                'If the user asks for help, explain what you can do.\n'
+                '- create_recipe(...): add a new recipe.\n'
+                '- list_recipes(): list all recipes.\n'
+                '- update_recipe(id, ...): update any field of a recipe by ID.\n'
+                '- delete_recipe(id): delete a recipe by ID.\n'
+                'Always use the appropriate tool for the user request, and extract all possible fields from the prompt.'
             ),
         )
         self._register_tools()
 
     def _register_tools(self):
         @self.agent.tool
-        async def create_chore(ctx: RunContext[AssistantDeps], chore_name: str, assigned_members: list, start_date: str, repetition: str, due_time: Optional[str] = None, reminder: Optional[str] = None, type: Optional[str] = None):
+        async def create_chore(ctx: RunContext[AssistantDeps], chore_name: str = None, assigned_members: list = None, start_date: str = None, repetition: str = None, due_time: Optional[str] = None, reminder: Optional[str] = None, type: Optional[str] = None):
             db = ctx.deps.db
+            # If any required info is missing, ask for it with collecting_info marker
+            missing = []
+            if not chore_name:
+                missing.append("chore_name")
+            if not assigned_members:
+                missing.append("assigned_members")
+            if not start_date:
+                missing.append("start_date")
+            if not repetition:
+                missing.append("repetition")
+            if missing:
+                prompts = {
+                    "chore_name": "📝 **Let's create a new chore!**\nWhat should we call this chore? (e.g., `Laundry`, `Take out trash`)",
+                    "assigned_members": "👤 **Who should do this chore?**\nType one or more names (e.g., `Alex, Jamie`).",
+                    "start_date": "📅 **When should this chore start?**\nFormat: YYYY-MM-DD (e.g., `2023-12-01`).",
+                    "repetition": "🔁 **How often should this chore repeat?**\nChoose one: `daily`, `weekly`, `one-time`."
+                }
+                next_field = missing[0]
+                # Show summary of collected so far
+                summary = []
+                if chore_name: summary.append(f"📝 Name: `{chore_name}`")
+                if assigned_members: summary.append(f"👤 Assigned: {', '.join(assigned_members)}")
+                if start_date: summary.append(f"📅 Start: `{start_date}`")
+                if repetition: summary.append(f"🔁 Repeats: `{repetition}`")
+                summary_md = "\n".join(summary)
+                return f"<!-- stage: collecting_info -->\n{prompts[next_field]}" + (f"\n\n**So far:**\n{summary_md}" if summary_md else "")
             try:
                 chore = ChoreCreate(
                     chore_name=chore_name,
@@ -60,14 +90,15 @@ class HouseholdAssistantAgent:
                 )
                 db_chore = chore_crud.create_chore(db, chore)
                 return (
-                    f"**Chore Created!**\n\n"
-                    f"- **Name:** `{chore_name}`\n"
-                    f"- **Assigned:** {', '.join(assigned_members)}\n"
-                    f"- **Start Date:** `{start_date}`\n"
-                    f"- **Repetition:** `{repetition}`\n"
-                    f"- **Due Time:** `{due_time or '23:59'}`\n"
-                    f"- **Type:** `{type or ''}`\n"
-                    f"- **Reminder:** `{reminder or 'None'}`\n"
+                    "<!-- stage: created -->\n"
+                    "🎉 **Chore Created!**\n\n"
+                    f"📝 **Name:** `{chore_name}`\n"
+                    f"👤 **Assigned:** {', '.join(assigned_members)}\n"
+                    f"📅 **Start Date:** `{start_date}`\n"
+                    f"🔁 **Repetition:** `{repetition}`\n"
+                    f"⏰ **Due Time:** `{due_time or '23:59'}`\n"
+                    f"🏷️ **Type:** `{type or ''}`\n"
+                    f"🔔 **Reminder:** `{reminder or 'None'}`\n"
                     f"\nChore ID: `{db_chore.id}`"
                 )
             except Exception as e:
@@ -89,28 +120,55 @@ class HouseholdAssistantAgent:
 
         @self.agent.tool
         async def update_chore(ctx: RunContext[AssistantDeps], id: int, **kwargs):
+            """
+            Update any field of a chore by ID, including the name. Example: update_chore(id=1, chore_name="Updated Chore").
+            You can also update assigned_members, repetition, due_time, reminder, type, etc. Extract all possible fields from the user's request and call this tool directly.
+            """
             db = ctx.deps.db
             c = chore_crud.get_chore(db, id)
             if not c:
-                return f"**Chore with ID `{id}` not found.**"
-            data = {k: kwargs[k] for k in kwargs if k in ChoreCreate.model_fields}
-            # Ensure assigned_members is always a list
-            assigned = c.__dict__.get("assigned_members")
+                return f"<!-- stage: collecting_info -->\nChore with ID `{id}` not found. Please provide a valid chore ID."
+            import re
+            new_name = kwargs.get("chore_name")
+            if not new_name:
+                for k, v in kwargs.items():
+                    if k in ["name", "new_name", "to", "called", "as"] and isinstance(v, str):
+                        new_name = v
+                        break
+                if not new_name and hasattr(ctx, "input") and ctx.input:
+                    m = re.search(r"(?:to be called|to have name|to|called|as) ['\"]?([\w\s-]+)['\"]?", ctx.input, re.IGNORECASE)
+                    if m:
+                        new_name = m.group(1).strip()
+            # Merge old values with updates
+            data = {k: kwargs[k] for k in kwargs if k in ChoreCreate.model_fields and kwargs[k] is not None}
+            if new_name:
+                data["chore_name"] = new_name
+            merged = {**c.__dict__, **data}
+            assigned = merged.get("assigned_members")
             if isinstance(assigned, str):
                 assigned = assigned.split(",") if "," in assigned else [assigned]
-            if "assigned_members" in data and isinstance(data["assigned_members"], str):
-                data["assigned_members"] = [data["assigned_members"]]
-            chore = ChoreCreate(**{**c.__dict__, **data, "assigned_members": data.get("assigned_members", assigned)})
-            updated = chore_crud.update_chore(db, id, chore)
+            merged["assigned_members"] = data.get("assigned_members", assigned)
+            merged.pop("_sa_instance_state", None)
+            # If at least one field is being updated, apply the update immediately
+            if data:
+                chore = ChoreCreate(**merged)
+                updated = chore_crud.update_chore(db, id, chore)
+                return (
+                    "<!-- stage: confirming_info -->\n"
+                    f"✅ **Chore Updated!**\n\n"
+                    f"📝 **Name:** `{chore.chore_name}`\n"
+                    f"👤 **Assigned:** {', '.join(chore.assigned_members)}\n"
+                    f"🔁 **Repetition:** `{chore.repetition}`\n"
+                    f"⏰ **Due Time:** `{chore.due_time}`\n"
+                    f"🏷️ **Type:** `{chore.type or ''}`\n"
+                    f"🔔 **Reminder:** `{chore.reminder or 'None'}`\n\n"
+                    "Update complete!"
+                )
+            # Otherwise, ask for missing info
             return (
-                f"**Chore Updated!**\n\n"
-                f"- **ID:** `{id}`\n"
-                f"- **Name:** `{chore.chore_name}`\n"
-                f"- **Assigned:** {', '.join(chore.assigned_members)}\n"
-                f"- **Repetition:** `{chore.repetition}`\n"
-                f"- **Due Time:** `{chore.due_time}`\n"
-                f"- **Type:** `{chore.type or ''}`\n"
-                f"- **Reminder:** `{chore.reminder or 'None'}`"
+                "<!-- stage: collecting_info -->\n"
+                "I need more information to update this chore. Please specify what you want to change.\n\n"
+                f"Current values:\n- Name: `{c.chore_name}`\n- Assigned: {c.assigned_members}\n- Repetition: `{c.repetition}`\n- Due Time: `{c.due_time}`\n- Type: `{c.type or ''}`\n- Reminder: `{c.reminder or 'None'}`"
             )
 
         @self.agent.tool
@@ -120,28 +178,59 @@ class HouseholdAssistantAgent:
             return f"Chore {id} deleted." if ok else f"Chore {id} not found."
 
         @self.agent.tool
-        async def create_meal(ctx: RunContext[AssistantDeps], meal_name: str, exist: bool, meal_kind: str, meal_date: str, dishes: Optional[list] = None):
+        async def create_meal(ctx: RunContext[AssistantDeps], meal_name: str = None, exist: bool = None, meal_kind: str = None, meal_date: str = None, dishes: str = None):
             db = ctx.deps.db
-            try:
-                meal = MealCreate(
-                    meal_name=meal_name,
-                    exist=exist,
-                    meal_kind=meal_kind,
-                    meal_date=meal_date,
-                    dishes=dishes or []
-                )
-                db_meal = meal_crud.create_meal(db, meal)
-                return (
-                    f"**Meal Created!**\n\n"
-                    f"- **Name:** `{meal_name}`\n"
-                    f"- **Kind:** `{meal_kind}`\n"
-                    f"- **Date:** `{meal_date}`\n"
-                    f"- **Dishes:** {', '.join(dishes or [])}\n"
-                    f"- **In Recipes:** `{exist}`\n"
-                    f"\nMeal ID: `{db_meal.id}`"
-                )
-            except Exception as e:
-                return f"**Error creating meal:** `{e}`"
+            missing = []
+            if not meal_name:
+                missing.append("meal_name")
+            if exist is None:
+                # Try to infer from context
+                if hasattr(ctx, "input") and ctx.input:
+                    if any(word in ctx.input.lower() for word in ["new meal", "plan a meal", "create a meal", "add a meal"]):
+                        exist = False
+                if exist is None:
+                    # If all other fields are present, default to False
+                    if meal_name and meal_kind and meal_date:
+                        exist = False
+                    else:
+                        missing.append("exist")
+            if not meal_kind:
+                missing.append("meal_kind")
+            if not meal_date:
+                missing.append("meal_date")
+            if missing:
+                prompts = {
+                    "meal_name": "🍽️ **Let's plan a meal!**\nWhat would you like to call this meal? (e.g., `Pasta Night`)",
+                    "exist": "📖 **Is this meal already in the recipe database?**\nType `true` or `false`. If you see your meal in the suggestions, select it. Otherwise, let me know if this is a new meal.",
+                    "meal_kind": "🍳 **What kind of meal is this?**\nChoose one: `breakfast`, `lunch`, `dinner`, `snack`.",
+                    "meal_date": "📅 **When do you want to have this meal?**\nFormat: YYYY-MM-DD (e.g., `2023-12-01`)."
+                }
+                next_field = missing[0]
+                summary = f"\n**So far:**\n- Name: `{meal_name or '—'}`\n- Kind: `{meal_kind or '—'}`\n- Date: `{meal_date or '—'}`\n- Dishes: `{dishes or '—'}`"
+                return f"<!-- stage: collecting_info -->\n{prompts[next_field]}{summary}"
+            # All info present, create meal
+            dishes_list = dishes
+            if isinstance(dishes, str):
+                # Split on commas, strip whitespace
+                dishes_list = [d.strip() for d in dishes.split(",") if d.strip()]
+            meal = MealCreate(
+                meal_name=meal_name,
+                exist=exist,
+                meal_kind=meal_kind,
+                meal_date=meal_date,
+                dishes=dishes_list
+            )
+            m = meal_crud.create_meal(db, meal)
+            return (
+                "<!-- stage: created -->\n"
+                f"🎉 **Meal Created!**\n\n"
+                f"🍽️ **Name:** `{m.meal_name}`\n"
+                f"🗓️ **Date:** `{m.meal_date}`\n"
+                f"🍳 **Kind:** `{m.meal_kind}`\n"
+                f"🍲 **Dishes:** `{', '.join(m.dishes) if m.dishes else '—'}`\n"
+                f"📖 **Exists in DB:** `{m.exist}`\n"
+                "Meal planning complete!"
+            )
 
         @self.agent.tool
         async def list_meals(ctx: RunContext[AssistantDeps]):
@@ -161,20 +250,20 @@ class HouseholdAssistantAgent:
             db = ctx.deps.db
             m = meal_crud.get_meal(db, id)
             if not m:
-                return f"**Meal with ID `{id}` not found.**"
+                return f"<!-- stage: collecting_info -->\nMeal with ID `{id}` not found. Please provide a valid meal ID."
             data = {k: kwargs[k] for k in kwargs if k in MealCreate.model_fields}
-            # Ensure dishes is always a list
             if "dishes" in data and isinstance(data["dishes"], str):
                 data["dishes"] = [data["dishes"]]
             meal = MealCreate(**{**m.__dict__, **data})
             updated = meal_crud.update_meal(db, id, meal)
             return (
-                f"**Meal Updated!**\n\n"
-                f"- **ID:** `{id}`\n"
-                f"- **Name:** `{meal.meal_name}`\n"
-                f"- **Kind:** `{meal.meal_kind}`\n"
-                f"- **Date:** `{meal.meal_date}`\n"
-                f"- **Dishes:** {', '.join(meal.dishes or [])}"
+                "<!-- stage: confirming_info -->\n"
+                f"✅ **Meal Updated!**\n\n"
+                f"🍽️ **Name:** `{m.meal_name}`\n"
+                f"🍳 **Kind:** `{m.meal_kind}`\n"
+                f"📅 **Date:** `{m.meal_date}`\n"
+                f"🥗 **Dishes:** {', '.join(m.dishes or [])}\n\n"
+                "If everything looks good, type **Done** to confirm or **Edit** to change anything."
             )
 
         @self.agent.tool
@@ -184,20 +273,20 @@ class HouseholdAssistantAgent:
             return f"Meal {id} deleted." if ok else f"Meal {id} not found."
 
         @self.agent.tool
-        async def create_member(ctx: RunContext[AssistantDeps], name: str, gender: Optional[str] = None, avatar: Optional[str] = None):
+        async def create_member(ctx: RunContext[AssistantDeps], name: str = None, gender: Optional[str] = None, avatar: Optional[str] = None):
             db = ctx.deps.db
-            try:
-                member = FamilyMemberCreate(name=name, gender=gender, avatar=avatar)
-                db_member = member_crud.create_member(db, member)
-                return (
-                    f"**Family Member Added!**\n\n"
-                    f"- **Name:** `{name}`\n"
-                    f"- **Gender:** `{gender or ''}`\n"
-                    f"- **Avatar:** `{avatar or ''}`\n"
-                    f"\nMember ID: `{db_member.id}`"
-                )
-            except Exception as e:
-                return f"**Error creating member:** `{e}`"
+            if not name:
+                return "<!-- stage: collecting_info -->\n👤 **Let's add a new family member!**\nWhat is their name? (e.g., `Jamie`)"
+            member = FamilyMemberCreate(name=name, gender=gender, avatar=avatar)
+            db_member = member_crud.create_member(db, member)
+            return (
+                "<!-- stage: created -->\n"
+                "🎉 **Family Member Added!**\n\n"
+                f"👤 **Name:** `{name}`\n"
+                f"⚧️ **Gender:** `{gender or ''}`\n"
+                f"🖼️ **Avatar:** `{avatar or ''}`\n"
+                f"\nMember ID: `{db_member.id}`"
+            )
 
         @self.agent.tool
         async def list_members(ctx: RunContext[AssistantDeps]):
@@ -217,16 +306,17 @@ class HouseholdAssistantAgent:
             db = ctx.deps.db
             m = member_crud.get_member(db, id)
             if not m:
-                return f"**Member with ID `{id}` not found.**"
+                return f"<!-- stage: collecting_info -->\nMember with ID `{id}` not found. Please provide a valid member ID."
             data = {k: kwargs[k] for k in kwargs if k in FamilyMemberCreate.model_fields}
             member = FamilyMemberCreate(**{**m.__dict__, **data})
             updated = member_crud.update_member(db, id, member)
             return (
-                f"**Member Updated!**\n\n"
-                f"- **ID:** `{id}`\n"
-                f"- **Name:** `{member.name}`\n"
-                f"- **Gender:** `{member.gender or ''}`\n"
-                f"- **Avatar:** `{member.avatar or ''}`"
+                "<!-- stage: confirming_info -->\n"
+                f"✅ **Member Updated!**\n\n"
+                f"👤 **Name:** `{member.name}`\n"
+                f"⚧️ **Gender:** `{member.gender or ''}`\n"
+                f"🖼️ **Avatar:** `{member.avatar or ''}`\n\n"
+                "If everything looks good, type **Done** to confirm or **Edit** to change anything."
             )
 
         @self.agent.tool
@@ -234,3 +324,58 @@ class HouseholdAssistantAgent:
             db = ctx.deps.db
             ok = member_crud.delete_member(db, id)
             return f"Member {id} deleted." if ok else f"Member {id} not found."
+
+        @self.agent.tool
+        async def list_recipes(ctx: RunContext[AssistantDeps]):
+            db = ctx.deps.db
+            recipes = recipe_crud.get_recipes(db)
+            if not recipes:
+                return "No recipes found."
+            header = '| ID | Name | Kind | Description |\n|---|---|---|---|'
+            rows = [
+                f"| {r.id} | {r.name} | {r.kind} | {r.description or ''} |"
+                for r in recipes
+            ]
+            return f"**Recipes**\n\n{header}\n" + "\n".join(rows)
+
+        @self.agent.tool
+        async def create_recipe(ctx: RunContext[AssistantDeps], name: str = None, kind: str = None, description: str = ""):
+            db = ctx.deps.db
+            if not name:
+                return "<!-- stage: collecting_info -->\n🍲 **Let's add a new recipe!**\nWhat is the name of the recipe? (e.g., `Mapo Tofu`)"
+            if not kind:
+                return "<!-- stage: collecting_info -->\n🍲 **What kind of recipe is this?**\nChoose one: `breakfast`, `lunch`, `dinner`, `snack`."
+            recipe = RecipeCreate(name=name, kind=kind, description=description)
+            db_recipe = recipe_crud.create_recipe(db, recipe)
+            return (
+                "<!-- stage: created -->\n"
+                "🎉 **Recipe Created!**\n\n"
+                f"🍲 **Name:** `{name}`\n"
+                f"🍳 **Kind:** `{kind}`\n"
+                f"📝 **Description:** `{description}`\n"
+                f"\nRecipe ID: `{db_recipe.id}`"
+            )
+
+        @self.agent.tool
+        async def update_recipe(ctx: RunContext[AssistantDeps], id: int, **kwargs):
+            db = ctx.deps.db
+            r = recipe_crud.get_recipe(db, id)
+            if not r:
+                return f"<!-- stage: collecting_info -->\nRecipe with ID `{id}` not found. Please provide a valid recipe ID."
+            data = {k: kwargs[k] for k in kwargs if k in RecipeCreate.model_fields}
+            recipe = RecipeCreate(**{**r.__dict__, **data})
+            updated = recipe_crud.update_recipe(db, id, recipe)
+            return (
+                "<!-- stage: confirming_info -->\n"
+                f"✅ **Recipe Updated!**\n\n"
+                f"🍲 **Name:** `{recipe.name}`\n"
+                f"🍳 **Kind:** `{recipe.kind}`\n"
+                f"📝 **Description:** `{recipe.description or ''}`\n\n"
+                "If everything looks good, type **Done** to confirm or **Edit** to change anything."
+            )
+
+        @self.agent.tool
+        async def delete_recipe(ctx: RunContext[AssistantDeps], id: int):
+            db = ctx.deps.db
+            ok = recipe_crud.delete_recipe(db, id)
+            return f"Recipe {id} deleted." if ok else f"Recipe {id} not found."
