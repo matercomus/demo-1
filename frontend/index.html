@@ -4,11 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Smart Household Assistant</title>
-    <link rel="stylesheet" href="style.css">
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body>
-    <div id="app">
-        <!-- The app UI will be rendered here by app.js -->
+<body class="bg-gray-50 min-h-screen flex flex-col items-center py-8">
+    <div class="w-full max-w-2xl bg-white rounded-xl shadow-lg p-6">
+        <div id="app" class="space-y-6">
+            <!-- App content rendered by app.js -->
+        </div>
     </div>
     <script src="app.js"></script>
 </body>
