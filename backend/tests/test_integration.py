@@ -34,6 +34,10 @@ def override_get_db(test_session_local):
     app.dependency_overrides.clear()
 
 def test_chore_step_and_list():
+    """
+    Test the step-based chore creation and listing via API endpoints.
+    This does not use the agent or prompt flows.
+    """
     client = TestClient(app)
     # Create a chore via step flow
     today = str(date.today())
@@ -56,6 +60,10 @@ def test_chore_step_and_list():
     assert any(c["chore_name"] == "Test Chore" for c in chores)
 
 def test_meal_step_and_list():
+    """
+    Test the step-based meal creation and listing via API endpoints.
+    This does not use the agent or prompt flows.
+    """
     client = TestClient(app)
     today = str(date.today())
     # Step 1: meal_name

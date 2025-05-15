@@ -6,6 +6,9 @@ import pytest
 client = TestClient(app)
 
 def test_create_and_list_member():
+    """
+    Test member creation and listing via API endpoints (not agent prompt).
+    """
     member = {"name": "Alex", "gender": "male", "avatar": "http://example.com/alex.png"}
     r = client.post("/members", json=member)
     assert r.status_code == 200
@@ -15,6 +18,9 @@ def test_create_and_list_member():
     assert any(m["name"] == "Alex" for m in r.json())
 
 def test_create_and_list_chore():
+    """
+    Test chore creation, update, and deletion via API endpoints (not agent prompt).
+    """
     chore = {
         "chore_name": "Laundry",
         "icon": "🧺",
@@ -49,6 +55,9 @@ def test_create_and_list_chore():
     assert r.status_code == 404
 
 def test_create_and_list_meal():
+    """
+    Test meal creation, update, and deletion via API endpoints (not agent prompt).
+    """
     meal = {
         "meal_name": "Pasta",
         "exist": True,
@@ -80,6 +89,9 @@ def test_create_and_list_meal():
     assert r.status_code == 404
 
 def test_chore_not_found():
+    """
+    Test 404 responses for missing chores (not agent prompt).
+    """
     r = client.get("/chores/9999")
     assert r.status_code == 404
     r = client.put("/chores/9999", json={
@@ -90,6 +102,9 @@ def test_chore_not_found():
     assert r.status_code == 404
 
 def test_meal_not_found():
+    """
+    Test 404 responses for missing meals (not agent prompt).
+    """
     r = client.get("/meals/9999")
     assert r.status_code == 404
     r = client.put("/meals/9999", json={
@@ -100,6 +115,9 @@ def test_meal_not_found():
     assert r.status_code == 404
 
 def test_chore_step_flow():
+    """
+    Test the step-based chore creation flow via API endpoints (not agent prompt).
+    """
     # Start with empty data
     r = client.post("/chore/step", json={"current_data": {}})
     assert r.status_code == 200
@@ -123,6 +141,9 @@ def test_chore_step_flow():
     assert "id" in r.json()
 
 def test_meal_step_flow():
+    """
+    Test the step-based meal creation flow via API endpoints (not agent prompt).
+    """
     # Start with empty data
     r = client.post("/meal/step", json={"current_data": {}})
     assert r.status_code == 200

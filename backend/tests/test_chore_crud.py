@@ -3,6 +3,9 @@ from backend.crud.chore import create_chore, get_chore, get_chores, update_chore
 from datetime import date
 
 def test_chore_crud(db_session):
+    """
+    Pure CRUD test for Chore ORM via direct DB access (not agent prompt).
+    """
     # Create
     chore = ChoreCreate(
         chore_name="Laundry",
