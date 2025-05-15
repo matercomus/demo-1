@@ -14,6 +14,7 @@ import traceback
 from fastapi.responses import JSONResponse
 from fastapi import Body
 from backend.agents.llm_agent import HouseholdAssistantAgent, AssistantDeps
+import json
 
 setup_logging()
 
@@ -355,12 +356,24 @@ def meal_step(req: MealStepRequest, db: Session = Depends(get_db)):
         "id": db_meal.id
     }
 
+def _decode_message(m):
+    if isinstance(m, bytes):
+        return json.loads(m.decode("utf-8"))
+    if isinstance(m, dict):
+        return m
+    if isinstance(m, str):
+        return json.loads(m)
+    return m  # fallback
+
 @app.post("/chat/")
 async def chat_endpoint(data: dict = Body(...), db: Session = Depends(get_db)):
     message = data.get("message", "")
+    message_history = data.get("message_history", [])
     try:
-        reply = await household_agent.agent.run(message, deps=AssistantDeps(db=db))
+        reply = await household_agent.agent.run(message, deps=AssistantDeps(db=db), message_history=message_history)
         output = str(reply.output).strip() if hasattr(reply, 'output') else str(reply).strip()
+        # Get the new message history (all messages so far), JSON serializable dicts
+        new_history = [_decode_message(m) for m in reply.all_messages_json()] if hasattr(reply, 'all_messages_json') else message_history
         if not output or output.lower() in {"none", "", "null"}:
             # Fallback response
             return JSONResponse({"reply": (
@@ -372,7 +385,13 @@ async def chat_endpoint(data: dict = Body(...), db: Session = Depends(get_db)):
                 "- 👤 *Add a family member*: `Add a family member named Jamie, gender other.`\n"
                 "- 🍲 *Add a recipe*: `Add a recipe called Mapo Tofu for dinner.`\n\n"
                 "**What would you like to do?** Please provide more details, or try one of the example prompts above."
-            )})
-        return JSONResponse({"reply": output})
+            ), "message_history": new_history})
+        return JSONResponse({"reply": output, "message_history": new_history})
     except Exception as e:
-        return JSONResponse({"reply": f"Assistant error: {e}"})
+        # On error, still try to serialize message_history if possible
+        new_history = []
+        try:
+            new_history = [_decode_message(m) for m in reply.all_messages_json()] if 'reply' in locals() and hasattr(reply, 'all_messages_json') else message_history
+        except Exception:
+            new_history = message_history
+        return JSONResponse({"reply": f"Assistant error: {e}", "message_history": new_history})

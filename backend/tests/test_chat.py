@@ -11,12 +11,16 @@ client = TestClient(app)
     ("List all family members", "Members"),
 ])
 def test_chat_basic(prompt, expected):
-    response = client.post("/chat/", json={"message": prompt})
+    message_history = []
+    response = client.post("/chat/", json={"message": prompt, "message_history": message_history})
     assert response.status_code == 200
     data = response.json()
     assert "reply" in data
     # Just check the expected keyword is in the reply (case-insensitive)
     assert expected.lower() in data["reply"].lower()
+    # Optionally check message_history is present and is a list
+    assert "message_history" in data
+    assert isinstance(data["message_history"], list)
 
 def test_agent_tools_direct(db_session):
     from backend.agents.llm_agent import HouseholdAssistantAgent, AssistantDeps
@@ -25,62 +29,79 @@ def test_agent_tools_direct(db_session):
     agent = HouseholdAssistantAgent()
     deps = AssistantDeps(db=db_session)
 
-    async def run_agent(prompt):
-        result = await agent.agent.run(prompt, deps=deps)
+    async def run_agent(prompt, message_history):
+        result = await agent.agent.run(prompt, deps=deps, message_history=message_history)
         print(f"Prompt: {prompt}\nResult: {result}\n")
         return result
 
     # Chore: create, list, update, delete
     async def chore_flow():
+        message_history = []
         # Add a family member named Alex first
-        await run_agent("Add a family member named Alex, gender male.")
+        result = await run_agent("Add a family member named Alex, gender male.", message_history)
+        message_history = result.all_messages() if hasattr(result, 'all_messages') else message_history
         mem = db_session.query(FamilyMemberORM).filter_by(name="Alex").first()
         assert mem is not None
         # Now create the chore assigned to Alex
-        await run_agent("Add a new chore called Test Chore for Alex starting 2024-01-01 repeating daily.")
+        result = await run_agent("Add a new chore called Test Chore for Alex starting 2024-01-01 repeating daily.", message_history)
+        message_history = result.all_messages() if hasattr(result, 'all_messages') else message_history
         c = db_session.query(ChoreORM).filter_by(chore_name="Test Chore").first()
         assert c is not None
-        await run_agent(f"Update chore {c.id} to be called Updated Chore.")
+        result = await run_agent(f"Update chore {c.id} to be called Updated Chore.", message_history)
+        message_history = result.all_messages() if hasattr(result, 'all_messages') else message_history
         c2 = db_session.query(ChoreORM).filter_by(id=c.id).first()
         assert c2.chore_name == "Updated Chore"
-        await run_agent(f"Delete chore {c.id}.")
+        result = await run_agent(f"Delete chore {c.id}.", message_history)
+        message_history = result.all_messages() if hasattr(result, 'all_messages') else message_history
         c3 = db_session.query(ChoreORM).filter_by(id=c.id).first()
         assert c3 is None
 
     # Meal: create, list, update, delete
     async def meal_flow():
-        await run_agent("Plan a meal called Test Meal for lunch on 2024-01-02 with Salad.")
+        message_history = []
+        result = await run_agent("Plan a meal called Test Meal for lunch on 2024-01-02 with Salad.", message_history)
+        message_history = result.all_messages() if hasattr(result, 'all_messages') else message_history
         m = db_session.query(MealORM).filter_by(meal_name="Test Meal").first()
         assert m is not None
-        await run_agent(f"Rename meal {m.id} to Updated Meal and change dishes to Soup.")
+        result = await run_agent(f"Rename meal {m.id} to Updated Meal and change dishes to Soup.", message_history)
+        message_history = result.all_messages() if hasattr(result, 'all_messages') else message_history
         m2 = db_session.query(MealORM).filter_by(id=m.id).first()
         assert "Soup" in (m2.dishes or "")
-        await run_agent(f"Delete meal {m.id}.")
+        result = await run_agent(f"Delete meal {m.id}.", message_history)
+        message_history = result.all_messages() if hasattr(result, 'all_messages') else message_history
         m3 = db_session.query(MealORM).filter_by(id=m.id).first()
         assert m3 is None
 
     # Member: create, list, update, delete
     async def member_flow():
-        await run_agent("Add a family member named Jamie, gender other.")
+        message_history = []
+        result = await run_agent("Add a family member named Jamie, gender other.", message_history)
+        message_history = result.all_messages() if hasattr(result, 'all_messages') else message_history
         mem = db_session.query(FamilyMemberORM).filter_by(name="Jamie").first()
         assert mem is not None
-        await run_agent(f"Update member {mem.id} to be called Jamie Updated.")
+        result = await run_agent(f"Update member {mem.id} to be called Jamie Updated.", message_history)
+        message_history = result.all_messages() if hasattr(result, 'all_messages') else message_history
         mem2 = db_session.query(FamilyMemberORM).filter_by(id=mem.id).first()
         assert mem2.name == "Jamie Updated"
-        await run_agent(f"Delete member {mem.id}.")
+        result = await run_agent(f"Delete member {mem.id}.", message_history)
+        message_history = result.all_messages() if hasattr(result, 'all_messages') else message_history
         mem3 = db_session.query(FamilyMemberORM).filter_by(id=mem.id).first()
         assert mem3 is None
 
     # Recipe: create, list, update, delete
     async def recipe_flow():
-        await run_agent("Add a recipe called Mapo Tofu for dinner. Description: Spicy tofu with pork.")
+        message_history = []
+        result = await run_agent("Add a recipe called Mapo Tofu for dinner. Description: Spicy tofu with pork.", message_history)
+        message_history = result.all_messages() if hasattr(result, 'all_messages') else message_history
         r = db_session.query(RecipeORM).filter_by(name="Mapo Tofu").first()
         assert r is not None
-        await run_agent(f"Update recipe {r.id} to be called Mapo Tofu (Vegetarian) and description to Spicy tofu with mushrooms.")
+        result = await run_agent(f"Update recipe {r.id} to be called Mapo Tofu (Vegetarian) and description to Spicy tofu with mushrooms.", message_history)
+        message_history = result.all_messages() if hasattr(result, 'all_messages') else message_history
         r2 = db_session.query(RecipeORM).filter_by(id=r.id).first()
         assert "Vegetarian" in r2.name
         assert "mushrooms" in (r2.description or "")
-        await run_agent(f"Delete recipe {r.id}.")
+        result = await run_agent(f"Delete recipe {r.id}.", message_history)
+        message_history = result.all_messages() if hasattr(result, 'all_messages') else message_history
         r3 = db_session.query(RecipeORM).filter_by(id=r.id).first()
         assert r3 is None
 

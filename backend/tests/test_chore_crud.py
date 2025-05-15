@@ -25,7 +25,7 @@ def test_chore_crud(db_session):
     all_chores = get_chores(db_session)
     assert any(c.id == db_chore.id for c in all_chores)
     # Update
-    updated = update_chore(db_session, db_chore.id, chore.copy(update={"chore_name": "Laundry Updated"}))
+    updated = update_chore(db_session, db_chore.id, chore.model_copy(update={"chore_name": "Laundry Updated"}))
     assert updated.chore_name == "Laundry Updated"
     # Delete
     ok = delete_chore(db_session, db_chore.id)
