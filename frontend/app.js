@@ -927,11 +927,17 @@ function handleChatSubmit(e) {
   chatError = '';
   renderMenu();
   scrollChatToBottom();
-  // Send to backend
+  // Send to backend with full message history
   fetch('http://localhost:8000/chat/', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message: msg })
+    body: JSON.stringify({
+      message: msg,
+      message_history: chatMessages.map(m => ({
+        role: m.role === 'bot' ? 'assistant' : m.role,
+        content: m.content
+      }))
+    })
   })
     .then(res => res.json())
     .then(data => {

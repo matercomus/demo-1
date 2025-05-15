@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.schemas import ChoreCreate, ChoreRead, MealCreate, MealRead, FamilyMemberCreate, FamilyMemberRead, RecipeCreate, RecipeRead
 from backend.crud import chore as chore_crud, meal as meal_crud, member as member_crud, recipe as recipe_crud
 from backend.deps import get_db
-from backend.logging_config import setup_logging
+from backend.logging_config import setup_logging, get_logger
 from backend.database import Base, get_engine
 from sqlalchemy.orm import Session
 import traceback
@@ -15,8 +15,12 @@ from fastapi.responses import JSONResponse
 from fastapi import Body
 from backend.agents.llm_agent import HouseholdAssistantAgent, AssistantDeps
 import json
+from backend.utils import normalize_message_history
+from pydantic_ai.messages import ModelMessagesTypeAdapter, ModelRequest, ModelResponse, UserPromptPart, SystemPromptPart, TextPart
+from pydantic_core import to_jsonable_python
 
 setup_logging()
+logger = get_logger(__name__)
 
 app = FastAPI()
 
@@ -365,33 +369,43 @@ def _decode_message(m):
         return json.loads(m)
     return m  # fallback
 
+def openai_to_model_messages(history):
+    result = []
+    for msg in history:
+        role = msg.get("role")
+        content = msg.get("content")
+        if role == "system":
+            result.append(ModelRequest(parts=[SystemPromptPart(content=content)]))
+        elif role == "user":
+            result.append(ModelRequest(parts=[UserPromptPart(content=content)]))
+        elif role == "assistant":
+            result.append(ModelResponse(parts=[TextPart(content=content)]))
+    return result
+
 @app.post("/chat/")
 async def chat_endpoint(data: dict = Body(...), db: Session = Depends(get_db)):
     message = data.get("message", "")
     message_history = data.get("message_history", [])
+    # Convert OpenAI-style messages to ModelMessages if needed
+    if message_history and isinstance(message_history[0], dict) and "role" in message_history[0]:
+        message_history = openai_to_model_messages(message_history)
+    if message_history:
+        try:
+            message_history = ModelMessagesTypeAdapter.validate_python(message_history)
+        except Exception as e:
+            logger.error(f"Failed to parse message_history: {e}")
+            message_history = []
+    logger.info(f"Received chat message: {message}")
+    logger.info(f"Received message_history: {message_history}")
     try:
         reply = await household_agent.agent.run(message, deps=AssistantDeps(db=db), message_history=message_history)
         output = str(reply.output).strip() if hasattr(reply, 'output') else str(reply).strip()
-        # Get the new message history (all messages so far), JSON serializable dicts
         new_history = [_decode_message(m) for m in reply.all_messages_json()] if hasattr(reply, 'all_messages_json') else message_history
-        if not output or output.lower() in {"none", "", "null"}:
-            # Fallback response
-            return JSONResponse({"reply": (
-                "<!-- stage: collecting_info -->\n"
-                "🤖 **I need a bit more information to help you!**\n\n"
-                "Here are some things I can help with:\n"
-                "- 🧹 *Create a chore*: `Create a chore called Laundry for Alex starting tomorrow repeating weekly.`\n"
-                "- 🍽️ *Plan a meal*: `Plan a meal called Pasta for dinner tomorrow.`\n"
-                "- 👤 *Add a family member*: `Add a family member named Jamie, gender other.`\n"
-                "- 🍲 *Add a recipe*: `Add a recipe called Mapo Tofu for dinner.`\n\n"
-                "**What would you like to do?** Please provide more details, or try one of the example prompts above."
-            ), "message_history": new_history})
-        return JSONResponse({"reply": output, "message_history": new_history})
+        json_history = to_jsonable_python(new_history)
+        return JSONResponse({"reply": output, "message_history": json_history})
     except Exception as e:
-        # On error, still try to serialize message_history if possible
-        new_history = []
         try:
-            new_history = [_decode_message(m) for m in reply.all_messages_json()] if 'reply' in locals() and hasattr(reply, 'all_messages_json') else message_history
+            json_history = to_jsonable_python(message_history)
         except Exception:
-            new_history = message_history
-        return JSONResponse({"reply": f"Assistant error: {e}", "message_history": new_history})
+            json_history = []
+        return JSONResponse({"reply": f"Assistant error: {e}", "message_history": json_history})

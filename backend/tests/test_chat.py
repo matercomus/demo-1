@@ -4,6 +4,7 @@ from backend.main import app
 from backend.agents.llm_agent import HouseholdAssistantAgent, AssistantDeps
 from pydantic_ai import capture_run_messages, models
 from pydantic_ai.models.test import TestModel
+from pydantic_ai.messages import ModelRequest, UserPromptPart
 
 client = TestClient(app)
 
@@ -125,4 +126,35 @@ def test_fuzzy_recipe_matching(db_session):
     resp2 = client.post("/meal/step", json={"current_data": {"meal_name": "Unicorn Pie"}})
     data2 = resp2.json()
     assert data2["stage"] == "collecting_info"
-    assert data2["suggested_recipes"] == [] 
+    assert data2["suggested_recipes"] == []
+
+def test_multi_turn_add_meal(db_session):
+    """
+    Test that the agent correctly infers context and triggers create_meal only after all info is provided in a multi-turn chat.
+    Only the final turn's tool calls are checked, as TestModel triggers all tools on every run.
+    """
+    from backend.agents.llm_agent import HouseholdAssistantAgent, AssistantDeps
+    from pydantic_ai.messages import ModelRequest, UserPromptPart
+    agent = HouseholdAssistantAgent().agent
+    deps = AssistantDeps(db=db_session)
+    message_history = []
+    user_turns = [
+        "add meal",
+        "pesto pasta",
+        "dinner",
+        "2025-05-20"
+    ]
+    with agent.override(model=TestModel()):
+        for turn in user_turns[:-1]:
+            with capture_run_messages():
+                agent.run_sync(turn, deps=deps, message_history=message_history)
+            message_history.append(ModelRequest(parts=[UserPromptPart(content=turn)]))
+        # Final turn: check tool calls
+        with capture_run_messages() as messages:
+            agent.run_sync(user_turns[-1], deps=deps, message_history=message_history)
+        tool_calls = [
+            part.tool_name
+            for m in messages if hasattr(m, 'parts')
+            for part in m.parts if getattr(part, 'tool_name', None)
+        ]
+    assert 'create_meal' in tool_calls, f"'create_meal' not found in tool calls for final turn: {tool_calls}" 

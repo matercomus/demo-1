@@ -7,6 +7,48 @@ from dotenv import load_dotenv
 from backend.crud import chore as chore_crud, meal as meal_crud, member as member_crud, recipe as recipe_crud
 from backend.schemas import ChoreCreate, MealCreate, FamilyMemberCreate, RecipeCreate
 from backend.models import Chore, Meal, FamilyMember
+import threading
+import time
+try:
+    from watchdog.observers import Observer
+    from watchdog.events import FileSystemEventHandler
+    WATCHDOG_AVAILABLE = True
+except ImportError:
+    WATCHDOG_AVAILABLE = False
+
+PROMPT_PATH = os.path.join(os.path.dirname(__file__), '../../prompts/household_agent_system.md')
+
+def load_system_prompt():
+    try:
+        with open(PROMPT_PATH, 'r', encoding='utf-8') as f:
+            return f.read()
+    except Exception:
+        # Fallback to the old prompt if file missing
+        return (
+            'You are a smart household assistant. Use the full conversation history to understand the user\'s intent and fill in missing information. '
+            'If the user provides information over multiple messages, combine them to determine the user\'s request. '
+            'You can manage chores, meals, family members, and recipes. '
+            'You have access to the following tools and should use them directly whenever the user requests a change, including renaming or updating any field. '
+            'For example, if the user says "rename chore 1 to Updated Chore", call update_chore(id=1, chore_name="Updated Chore").\n'
+            'Tools:\n'
+            '- create_chore(...): create a new chore.\n'
+            '- list_chores(): list all chores.\n'
+            '- update_chore(id, ...): update any field of a chore by ID, including the name. Example: update_chore(id=1, chore_name="Updated Chore").\n'
+            '- delete_chore(id): delete a chore by ID.\n'
+            '- create_meal(...): create a new meal.\n'
+            '- list_meals(): list all meals.\n'
+            '- update_meal(id, ...): update any field of a meal by ID.\n'
+            '- delete_meal(id): delete a meal by ID.\n'
+            '- create_member(...): add a family member.\n'
+            '- list_members(): list all family members.\n'
+            '- update_member(id, ...): update any field of a member by ID.\n'
+            '- delete_member(id): delete a member by ID.\n'
+            '- create_recipe(...): add a new recipe.\n'
+            '- list_recipes(): list all recipes.\n'
+            '- update_recipe(id, ...): update any field of a recipe by ID.\n'
+            '- delete_recipe(id): delete a recipe by ID.\n'
+            'Always use the appropriate tool for the user request, and extract all possible fields from the prompt.'
+        )
 
 @dataclass
 class AssistantDeps:
@@ -15,37 +57,52 @@ class AssistantDeps:
 class HouseholdAssistantAgent:
     def __init__(self):
         load_dotenv()
+        self.system_prompt = load_system_prompt()
         self.agent = Agent[
             AssistantDeps, str
         ](
             os.getenv('OPENAI_MODEL', 'openai:gpt-4o'),
             deps_type=AssistantDeps,
             output_type=str,
-            system_prompt=(
-                'You are a smart household assistant. You can manage chores, meals, family members, and recipes. '
-                'You have access to the following tools and should use them directly whenever the user requests a change, including renaming or updating any field. '
-                'For example, if the user says "rename chore 1 to Updated Chore", call update_chore(id=1, chore_name="Updated Chore").\n'
-                'Tools:\n'
-                '- create_chore(...): create a new chore.\n'
-                '- list_chores(): list all chores.\n'
-                '- update_chore(id, ...): update any field of a chore by ID, including the name. Example: update_chore(id=1, chore_name="Updated Chore").\n'
-                '- delete_chore(id): delete a chore by ID.\n'
-                '- create_meal(...): create a new meal.\n'
-                '- list_meals(): list all meals.\n'
-                '- update_meal(id, ...): update any field of a meal by ID.\n'
-                '- delete_meal(id): delete a meal by ID.\n'
-                '- create_member(...): add a family member.\n'
-                '- list_members(): list all family members.\n'
-                '- update_member(id, ...): update any field of a member by ID.\n'
-                '- delete_member(id): delete a member by ID.\n'
-                '- create_recipe(...): add a new recipe.\n'
-                '- list_recipes(): list all recipes.\n'
-                '- update_recipe(id, ...): update any field of a recipe by ID.\n'
-                '- delete_recipe(id): delete a recipe by ID.\n'
-                'Always use the appropriate tool for the user request, and extract all possible fields from the prompt.'
-            ),
+            system_prompt=self.system_prompt,
         )
         self._register_tools()
+        self._start_prompt_watcher()
+
+    def reload_prompt(self):
+        self.system_prompt = load_system_prompt()
+        self.agent.system_prompt = self.system_prompt
+
+    def _start_prompt_watcher(self):
+        if WATCHDOG_AVAILABLE:
+            class PromptFileHandler(FileSystemEventHandler):
+                def __init__(self, agent):
+                    self.agent = agent
+                def on_modified(self, event):
+                    if os.path.abspath(event.src_path) == os.path.abspath(PROMPT_PATH):
+                        self.agent.reload_prompt()
+            observer = Observer()
+            handler = PromptFileHandler(self)
+            observer.schedule(handler, os.path.dirname(PROMPT_PATH), recursive=False)
+            observer.daemon = True
+            observer.start()
+        else:
+            # Fallback: poll every 2 seconds
+            def poll():
+                last_mtime = None
+                while True:
+                    try:
+                        mtime = os.path.getmtime(PROMPT_PATH)
+                        if last_mtime is None:
+                            last_mtime = mtime
+                        elif mtime != last_mtime:
+                            self.reload_prompt()
+                            last_mtime = mtime
+                    except Exception:
+                        pass
+                    time.sleep(2)
+            t = threading.Thread(target=poll, daemon=True)
+            t.start()
 
     def _register_tools(self):
         @self.agent.tool
