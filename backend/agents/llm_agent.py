@@ -9,6 +9,8 @@ from backend.schemas import ChoreCreate, MealCreate, FamilyMemberCreate, RecipeC
 from backend.models import Chore, Meal, FamilyMember
 import threading
 import time
+import logging
+
 try:
     from watchdog.observers import Observer
     from watchdog.events import FileSystemEventHandler
@@ -23,6 +25,7 @@ def load_system_prompt():
         with open(PROMPT_PATH, 'r', encoding='utf-8') as f:
             return f.read()
     except Exception:
+        logging.warning("Failed to load system prompt from %s, using fallback prompt.", PROMPT_PATH, exc_info=True)
         # Fallback to the old prompt if file missing
         return (
             'You are a smart household assistant. Use the full conversation history to understand the user\'s intent and fill in missing information. '

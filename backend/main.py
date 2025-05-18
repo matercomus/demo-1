@@ -394,13 +394,6 @@ async def chat_endpoint(data: dict = Body(...), db: Session = Depends(get_db)):
     message_history = openai_to_model_messages(raw_message_history)
     deps = AssistantDeps(db=db)
     logger = logging.getLogger("chat_endpoint")
-    def normalize_marker(reply):
-        marker_match = re.search(r"<!-- stage: (\w+) -->", reply)
-        if marker_match:
-            marker = marker_match.group(0)
-            reply_wo_marker = re.sub(r"<!-- stage: (\w+) -->", "", reply).strip()
-            return f"{marker}\n{reply_wo_marker}"
-        return reply
     try:
         agent = household_agent.agent
         if hasattr(agent, "run") and callable(getattr(agent, "run")):
@@ -408,19 +401,18 @@ async def chat_endpoint(data: dict = Body(...), db: Session = Depends(get_db)):
         else:
             result = agent.run_sync(message, deps=deps, message_history=message_history)
         reply = result.output if hasattr(result, 'output') else str(result)
-        reply = normalize_marker(reply)
-        if not re.match(r"^<!-- stage: (\w+) -->", reply):
-            if hasattr(agent, "run") and callable(getattr(agent, "run")):
-                result2 = await agent.run(message, deps=deps, message_history=message_history)
-            else:
-                result2 = agent.run_sync(message, deps=deps, message_history=message_history)
-            reply2 = result2.output if hasattr(result2, 'output') else str(result2)
-            reply2 = normalize_marker(reply2)
-            if re.match(r"^<!-- stage: (\w+) -->", reply2):
-                reply = reply2
-            else:
-                reply = "<!-- stage: error -->\n**Assistant error:** No stage marker in reply. Please try again or contact support."
-        return JSONResponse({"reply": reply, "message_history": raw_message_history})
+        # Only keep essential error logging below
+        # Determine stage based on message or context (simple heuristic)
+        stage = 'unknown'
+        if any(word in reply.lower() for word in ["what would you like", "please provide", "could you", "need", "missing", "specify", "details", "information"]):
+            stage = 'collecting_info'
+        elif any(word in reply.lower() for word in ["confirm", "summary", "does this look", "type 'done'", "edit"]):
+            stage = 'confirming_info'
+        elif any(word in reply.lower() for word in ["created", "success", "added", "complete", "done"]):
+            stage = 'created'
+        elif any(word in reply.lower() for word in ["error", "not found", "invalid"]):
+            stage = 'error'
+        return JSONResponse({"stage": stage, "reply": reply, "message_history": raw_message_history})
     except Exception as e:
         logger.exception("Error in /chat/ endpoint")
-        return JSONResponse({"reply": "<!-- stage: error -->\n**Assistant error:** Internal server error: {}".format(str(e)), "message_history": raw_message_history}, status_code=200)
+        return JSONResponse({"stage": "error", "reply": f"**Assistant error:** Internal server error: {str(e)}", "message_history": raw_message_history}, status_code=200)

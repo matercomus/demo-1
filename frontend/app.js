@@ -874,12 +874,12 @@ function renderChatUI() {
         ${chatMessages.length === 0 ? '<div class="text-gray-400 text-center">No messages yet. Say hello!</div>' :
           chatMessages.map(m => {
             if (m.role === 'bot') {
-              // If the message has a stage marker, render as a full-width card
-              if (/^<!-- stage: (\w+) -->/.test(m.content)) {
-                return `<div class="mb-4 w-full flex justify-start">${renderChatBotMessage(m.content, true)}</div>`;
+              // Use the stage field for card styling
+              if (m.stage && m.stage !== 'unknown') {
+                return `<div class="mb-4 w-full flex justify-start">${renderChatBotMessage(m.content, m.stage, true)}</div>`;
               }
               // Otherwise, render as a normal bubble
-              return `<div class="mb-2 flex justify-start">${renderChatBotMessage(m.content, false)}</div>`;
+              return `<div class="mb-2 flex justify-start">${renderChatBotMessage(m.content, m.stage, false)}</div>`;
             } else {
               // User message
               return `<div class="mb-2 flex justify-end"><div class="max-w-xl px-3 py-2 rounded-lg shadow bg-blue-600 text-white">${m.content}</div></div>`;
@@ -898,27 +898,13 @@ function renderChatUI() {
   return chatBox;
 }
 
-function renderChatBotMessage(content, fullWidth = false) {
-  // Detect stage marker
-  let stage = null;
-  let msg = content;
-  const stageMatch = msg.match(/^<!-- stage: (\w+) -->/);
-  if (stageMatch) {
-    stage = stageMatch[1];
-    msg = msg.replace(/^<!-- stage: (\w+) -->/, '').trim();
-    // Debug log
-    console.log('[DEBUG] Detected stage marker in bot message:', stage, msg);
-  }
-  // Try to extract step/progress info if present (future extensibility)
-  let stepInfo = null;
-  // Optionally, parse for step/progress info here if you add it to the backend
-  if (stage) {
-    // If fullWidth, remove max-w-xl and center
-    // Add a visible border for debugging
-    return `<div class="${fullWidth ? 'w-full' : 'max-w-xl'}" style="border: 3px dashed red; background: #e0f2fe;">${renderStageCard(window.marked ? window.marked.parse(msg) : msg, stage, stepInfo)}</div>`;
+function renderChatBotMessage(content, stage = null, fullWidth = false) {
+  // Only use the stage for card styling, no badge
+  if (stage && stage !== 'unknown') {
+    return `<div class="${fullWidth ? 'w-full' : 'max-w-xl'}">${renderStageCard(window.marked ? window.marked.parse(content) : content, stage, null)}</div>`;
   }
   // Fallback: normal chat bubble
-  return `<div class="max-w-xl px-3 py-2 rounded-lg shadow bg-white border text-gray-800">${window.marked ? window.marked.parse(msg) : msg}</div>`;
+  return `<div class="max-w-xl px-3 py-2 rounded-lg shadow bg-white border text-gray-800">${window.marked ? window.marked.parse(content) : content}</div>`;
 }
 
 function scrollChatToBottom() {
@@ -953,10 +939,18 @@ function handleChatSubmit(e) {
   })
     .then(res => res.json())
     .then(data => {
+      if (typeof data === 'string') {
+        try {
+          data = JSON.parse(data);
+        } catch (e) {
+          // Optionally keep this error log for rare parse issues
+          console.error('Failed to parse data:', data);
+        }
+      }
       if (data && data.reply) {
-        chatMessages.push({ role: 'bot', content: data.reply });
+        chatMessages.push({ role: 'bot', content: data.reply, stage: data.stage });
       } else {
-        chatMessages.push({ role: 'bot', content: 'Sorry, I did not understand that.' });
+        chatMessages.push({ role: 'bot', content: 'Sorry, I did not understand that.', stage: 'error' });
       }
       chatLoading = false;
       renderMenu();
