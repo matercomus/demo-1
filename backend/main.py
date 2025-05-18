@@ -20,6 +20,9 @@ from pydantic_ai.messages import ModelMessagesTypeAdapter, ModelRequest, ModelRe
 from pydantic_core import to_jsonable_python
 import re
 import logging
+import os
+import openai
+from functools import lru_cache
 
 setup_logging()
 logger = get_logger(__name__)
@@ -384,6 +387,37 @@ def openai_to_model_messages(history):
             result.append(ModelResponse(parts=[TextPart(content=content)]))
     return result
 
+@lru_cache(maxsize=128)
+def classify_stage_llm(reply: str) -> str:
+    prompt = (
+        "Classify the following assistant reply into one of these stages: collecting_info, confirming_info, created, error.\n"
+        f"Reply: \"{reply}\"\nStage:"
+    )
+    try:
+        openai.api_key = os.getenv("OPENAI_API_KEY")
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",  # Use a cheap/fast model
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=1,
+            temperature=0
+        )
+        stage = response.choices[0].message['content'].strip().lower()
+        if stage not in {"collecting_info", "confirming_info", "created", "error"}:
+            stage = "unknown"
+        return stage
+    except Exception as e:
+        # Fallback to old heuristic if LLM fails
+        reply_lower = reply.lower()
+        if any(word in reply_lower for word in ["what would you like", "please provide", "could you", "need", "missing", "specify", "details", "information"]):
+            return 'collecting_info'
+        elif any(word in reply_lower for word in ["confirm", "summary", "does this look", "type 'done'", "edit"]):
+            return 'confirming_info'
+        elif any(word in reply_lower for word in ["created", "success", "added", "complete", "done", "has been added", "successfully added", "added as a", "has been successfully"]):
+            return 'created'
+        elif any(word in reply_lower for word in ["error", "not found", "invalid"]):
+            return 'error'
+        return 'unknown'
+
 @app.post("/chat/")
 async def chat_endpoint(data: dict = Body(...), db: Session = Depends(get_db)):
     from backend.main import household_agent, openai_to_model_messages
@@ -401,17 +435,8 @@ async def chat_endpoint(data: dict = Body(...), db: Session = Depends(get_db)):
         else:
             result = agent.run_sync(message, deps=deps, message_history=message_history)
         reply = result.output if hasattr(result, 'output') else str(result)
-        # Only keep essential error logging below
-        # Determine stage based on message or context (simple heuristic)
-        stage = 'unknown'
-        if any(word in reply.lower() for word in ["what would you like", "please provide", "could you", "need", "missing", "specify", "details", "information"]):
-            stage = 'collecting_info'
-        elif any(word in reply.lower() for word in ["confirm", "summary", "does this look", "type 'done'", "edit"]):
-            stage = 'confirming_info'
-        elif any(word in reply.lower() for word in ["created", "success", "added", "complete", "done"]):
-            stage = 'created'
-        elif any(word in reply.lower() for word in ["error", "not found", "invalid"]):
-            stage = 'error'
+        # Use LLM classifier for stage, fallback to heuristic if needed
+        stage = classify_stage_llm(reply)
         return JSONResponse({"stage": stage, "reply": reply, "message_history": raw_message_history})
     except Exception as e:
         logger.exception("Error in /chat/ endpoint")
