@@ -872,11 +872,19 @@ function renderChatUI() {
       <h2 class="text-lg font-semibold text-gray-700 mb-2">🤖 Assistant Chat</h2>
       <div id="chatHistory" class="flex-1 bg-gray-100 rounded-lg p-4 overflow-y-auto mb-2 border border-gray-200">
         ${chatMessages.length === 0 ? '<div class="text-gray-400 text-center">No messages yet. Say hello!</div>' :
-          chatMessages.map(m => `
-            <div class="mb-2 flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}">
-              ${m.role === 'bot' ? renderChatBotMessage(m.content) : `<div class="max-w-xl px-3 py-2 rounded-lg shadow bg-blue-600 text-white">${m.content}</div>`}
-            </div>
-          `).join('')
+          chatMessages.map(m => {
+            if (m.role === 'bot') {
+              // If the message has a stage marker, render as a full-width card
+              if (/^<!-- stage: (\w+) -->/.test(m.content)) {
+                return `<div class="mb-4 w-full flex justify-start">${renderChatBotMessage(m.content, true)}</div>`;
+              }
+              // Otherwise, render as a normal bubble
+              return `<div class="mb-2 flex justify-start">${renderChatBotMessage(m.content, false)}</div>`;
+            } else {
+              // User message
+              return `<div class="mb-2 flex justify-end"><div class="max-w-xl px-3 py-2 rounded-lg shadow bg-blue-600 text-white">${m.content}</div></div>`;
+            }
+          }).join('')
         }
         ${chatLoading ? '<div class="flex items-center gap-2 text-gray-500"><svg class="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path></svg> Assistant is typing...</div>' : ''}
       </div>
@@ -890,7 +898,7 @@ function renderChatUI() {
   return chatBox;
 }
 
-function renderChatBotMessage(content) {
+function renderChatBotMessage(content, fullWidth = false) {
   // Detect stage marker
   let stage = null;
   let msg = content;
@@ -898,12 +906,16 @@ function renderChatBotMessage(content) {
   if (stageMatch) {
     stage = stageMatch[1];
     msg = msg.replace(/^<!-- stage: (\w+) -->/, '').trim();
+    // Debug log
+    console.log('[DEBUG] Detected stage marker in bot message:', stage, msg);
   }
   // Try to extract step/progress info if present (future extensibility)
   let stepInfo = null;
   // Optionally, parse for step/progress info here if you add it to the backend
   if (stage) {
-    return renderStageCard(window.marked ? window.marked.parse(msg) : msg, stage, stepInfo);
+    // If fullWidth, remove max-w-xl and center
+    // Add a visible border for debugging
+    return `<div class="${fullWidth ? 'w-full' : 'max-w-xl'}" style="border: 3px dashed red; background: #e0f2fe;">${renderStageCard(window.marked ? window.marked.parse(msg) : msg, stage, stepInfo)}</div>`;
   }
   // Fallback: normal chat bubble
   return `<div class="max-w-xl px-3 py-2 rounded-lg shadow bg-white border text-gray-800">${window.marked ? window.marked.parse(msg) : msg}</div>`;

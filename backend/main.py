@@ -18,6 +18,8 @@ import json
 from backend.utils import normalize_message_history
 from pydantic_ai.messages import ModelMessagesTypeAdapter, ModelRequest, ModelResponse, UserPromptPart, SystemPromptPart, TextPart
 from pydantic_core import to_jsonable_python
+import re
+import logging
 
 setup_logging()
 logger = get_logger(__name__)
@@ -384,28 +386,41 @@ def openai_to_model_messages(history):
 
 @app.post("/chat/")
 async def chat_endpoint(data: dict = Body(...), db: Session = Depends(get_db)):
+    from backend.main import household_agent, openai_to_model_messages
+    import re
+    import logging
     message = data.get("message", "")
-    message_history = data.get("message_history", [])
-    # Convert OpenAI-style messages to ModelMessages if needed
-    if message_history and isinstance(message_history[0], dict) and "role" in message_history[0]:
-        message_history = openai_to_model_messages(message_history)
-    if message_history:
-        try:
-            message_history = ModelMessagesTypeAdapter.validate_python(message_history)
-        except Exception as e:
-            logger.error(f"Failed to parse message_history: {e}")
-            message_history = []
-    logger.info(f"Received chat message: {message}")
-    logger.info(f"Received message_history: {message_history}")
+    raw_message_history = data.get("message_history", [])
+    message_history = openai_to_model_messages(raw_message_history)
+    deps = AssistantDeps(db=db)
+    logger = logging.getLogger("chat_endpoint")
+    def normalize_marker(reply):
+        marker_match = re.search(r"<!-- stage: (\w+) -->", reply)
+        if marker_match:
+            marker = marker_match.group(0)
+            reply_wo_marker = re.sub(r"<!-- stage: (\w+) -->", "", reply).strip()
+            return f"{marker}\n{reply_wo_marker}"
+        return reply
     try:
-        reply = await household_agent.agent.run(message, deps=AssistantDeps(db=db), message_history=message_history)
-        output = str(reply.output).strip() if hasattr(reply, 'output') else str(reply).strip()
-        new_history = [_decode_message(m) for m in reply.all_messages_json()] if hasattr(reply, 'all_messages_json') else message_history
-        json_history = to_jsonable_python(new_history)
-        return JSONResponse({"reply": output, "message_history": json_history})
+        agent = household_agent.agent
+        if hasattr(agent, "run") and callable(getattr(agent, "run")):
+            result = await agent.run(message, deps=deps, message_history=message_history)
+        else:
+            result = agent.run_sync(message, deps=deps, message_history=message_history)
+        reply = result.output if hasattr(result, 'output') else str(result)
+        reply = normalize_marker(reply)
+        if not re.match(r"^<!-- stage: (\w+) -->", reply):
+            if hasattr(agent, "run") and callable(getattr(agent, "run")):
+                result2 = await agent.run(message, deps=deps, message_history=message_history)
+            else:
+                result2 = agent.run_sync(message, deps=deps, message_history=message_history)
+            reply2 = result2.output if hasattr(result2, 'output') else str(result2)
+            reply2 = normalize_marker(reply2)
+            if re.match(r"^<!-- stage: (\w+) -->", reply2):
+                reply = reply2
+            else:
+                reply = "<!-- stage: error -->\n**Assistant error:** No stage marker in reply. Please try again or contact support."
+        return JSONResponse({"reply": reply, "message_history": raw_message_history})
     except Exception as e:
-        try:
-            json_history = to_jsonable_python(message_history)
-        except Exception:
-            json_history = []
-        return JSONResponse({"reply": f"Assistant error: {e}", "message_history": json_history})
+        logger.exception("Error in /chat/ endpoint")
+        return JSONResponse({"reply": "<!-- stage: error -->\n**Assistant error:** Internal server error: {}".format(str(e)), "message_history": raw_message_history}, status_code=200)
