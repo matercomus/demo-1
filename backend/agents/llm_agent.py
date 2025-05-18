@@ -10,6 +10,7 @@ from backend.models import Chore, Meal, FamilyMember
 import threading
 import time
 import logging
+from backend.agents.prompt_watcher import watch_file_for_changes
 
 try:
     from watchdog.observers import Observer
@@ -77,35 +78,7 @@ class HouseholdAssistantAgent:
         self.agent.system_prompt = self.system_prompt
 
     def _start_prompt_watcher(self):
-        if WATCHDOG_AVAILABLE:
-            class PromptFileHandler(FileSystemEventHandler):
-                def __init__(self, agent):
-                    self.agent = agent
-                def on_modified(self, event):
-                    if os.path.abspath(event.src_path) == os.path.abspath(PROMPT_PATH):
-                        self.agent.reload_prompt()
-            observer = Observer()
-            handler = PromptFileHandler(self)
-            observer.schedule(handler, os.path.dirname(PROMPT_PATH), recursive=False)
-            observer.daemon = True
-            observer.start()
-        else:
-            # Fallback: poll every 2 seconds
-            def poll():
-                last_mtime = None
-                while True:
-                    try:
-                        mtime = os.path.getmtime(PROMPT_PATH)
-                        if last_mtime is None:
-                            last_mtime = mtime
-                        elif mtime != last_mtime:
-                            self.reload_prompt()
-                            last_mtime = mtime
-                    except Exception:
-                        pass
-                    time.sleep(2)
-            t = threading.Thread(target=poll, daemon=True)
-            t.start()
+        watch_file_for_changes(PROMPT_PATH, self.reload_prompt, logger_name="llm_agent.prompt_watcher")
 
     def _register_tools(self):
         @self.agent.tool
