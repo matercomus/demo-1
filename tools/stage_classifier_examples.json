@@ -1,0 +1,82 @@
+[
+  {
+    "description": "Add meal - collecting_info (step 1)",
+    "reply": "<!-- stage: collecting_info -->\n🍽️ **Let's plan a meal!**\nWhat would you like to call this meal? (e.g., `Pasta Night`)",
+    "expected_stage": "collecting_info"
+  },
+  {
+    "description": "Add meal - collecting_info (step 2)",
+    "reply": "<!-- stage: collecting_info -->\n🍳 **What kind of meal is this?**\nChoose one: `breakfast`, `lunch`, `dinner`, `snack`.",
+    "expected_stage": "collecting_info"
+  },
+  {
+    "description": "Add meal - confirming_info",
+    "reply": "<!-- stage: confirming_info -->\nHere's your meal summary. Type 'Done' to confirm or provide changes.",
+    "expected_stage": "confirming_info"
+  },
+  {
+    "description": "Add meal - created",
+    "reply": "<!-- stage: created -->\n🎉 **Meal Created!**\n\n🍽️ **Name:** `Pasta Night`\n🗓️ **Date:** `2023-12-01`\n🍳 **Kind:** `dinner`\n🍲 **Dishes:** `Fish Soup, Salad`\n📖 **Exists in DB:** `false`\nMeal planning complete!",
+    "expected_stage": "created"
+  },
+  {
+    "description": "Add chore - collecting_info (step 1)",
+    "reply": "<!-- stage: collecting_info -->\n📝 **Let's create a new chore!**\nWhat should we call this chore? (e.g., `Laundry`, `Take out trash`)",
+    "expected_stage": "collecting_info"
+  },
+  {
+    "description": "Add chore - collecting_info (step 2)",
+    "reply": "<!-- stage: collecting_info -->\n👤 **Who should do this chore?**\nType one or more names (e.g., `Alex, Jamie`).",
+    "expected_stage": "collecting_info"
+  },
+  {
+    "description": "Add chore - confirming_info",
+    "reply": "<!-- stage: confirming_info -->\n✅ **Chore Updated!**\n\n📝 **Name:** `Laundry`\n👤 **Assigned:** Alex\n🔁 **Repetition:** `weekly`\n⏰ **Due Time:** `23:59`\n🏷️ **Type:** `individual`\n🔔 **Reminder:** `None`\n\nUpdate complete!",
+    "expected_stage": "confirming_info"
+  },
+  {
+    "description": "Add chore - created",
+    "reply": "<!-- stage: created -->\n🎉 **Chore Created!**\n\n📝 **Name:** `Laundry`\n👤 **Assigned:** Alex\n📅 **Start Date:** `2023-12-01`\n🔁 **Repetition:** `weekly`\n⏰ **Due Time:** `23:59`\n🏷️ **Type:** `individual`\n🔔 **Reminder:** `None`\n\nChore ID: `1`",
+    "expected_stage": "created"
+  },
+  {
+    "description": "Edit meal - collecting_info",
+    "reply": "<!-- stage: collecting_info -->\nWhich field would you like to edit? (e.g., `meal_name`, `meal_kind`, `meal_date`, `dishes`)",
+    "expected_stage": "collecting_info"
+  },
+  {
+    "description": "Edit meal - confirming_info",
+    "reply": "<!-- stage: confirming_info -->\n✅ **Meal Updated!**\n\n🍽️ **Name:** `Pasta Night`\n🍳 **Kind:** `dinner`\n📅 **Date:** `2023-12-01`\n🥗 **Dishes:** `Fish Soup, Salad`\n\nIf everything looks good, type **Done** to confirm or **Edit** to change anything.",
+    "expected_stage": "confirming_info"
+  },
+  {
+    "description": "Edit meal - created",
+    "reply": "<!-- stage: created -->\n🎉 **Meal Updated!**\n\n🍽️ **Name:** `Pasta Night`\n🍳 **Kind:** `dinner`\n📅 **Date:** `2023-12-01`\n🥗 **Dishes:** `Fish Soup, Salad`\n\nMeal update complete!",
+    "expected_stage": "created"
+  },
+  {
+    "description": "Show chores",
+    "reply": "**Chores**\n\n| ID | Chore Name | Assigned Members | Repetition | Due Time | Type |\n|---|---|---|---|---|---|\n| 1 | Laundry | Alex | weekly | 23:59 | individual |",
+    "expected_stage": "other"
+  },
+  {
+    "description": "Show meals",
+    "reply": "**Meals**\n\n| ID | Meal Name | Kind | Date | Dishes |\n|---|---|---|---|---|\n| 1 | Pasta Night | dinner | 2023-12-01 | Fish Soup, Salad |",
+    "expected_stage": "other"
+  },
+  {
+    "description": "Error - missing field",
+    "reply": "**Error creating chore:** `Missing required field: assigned_members`",
+    "expected_stage": "error"
+  },
+  {
+    "description": "Error - invalid date",
+    "reply": "**Error:** `Invalid date format. Please use YYYY-MM-DD.`",
+    "expected_stage": "error"
+  },
+  {
+    "description": "General assistant reply (not a stage flow)",
+    "reply": "Hello! How can I help you with your household tasks today?",
+    "expected_stage": "other"
+  }
+] 

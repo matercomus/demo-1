@@ -1,0 +1,149 @@
+[
+  {
+    "reply": "<!-- stage: collecting_info -->\n\ud83c\udf7d\ufe0f **Let's plan a meal!**\nWhat would you like to call this meal? (e.g., `Pasta Night`)",
+    "expected_stage": "collecting_info",
+    "got_stage": "unknown",
+    "ok": false,
+    "description": "Add meal - collecting info"
+  },
+  {
+    "reply": "<!-- stage: confirming_info -->\nHere's your meal summary. Type 'Done' to confirm or provide changes.",
+    "expected_stage": "confirming_info",
+    "got_stage": "unknown",
+    "ok": false,
+    "description": "Add meal - confirming info"
+  },
+  {
+    "reply": "<!-- stage: created -->\n\ud83c\udf89 **Meal Created!**\n\n\ud83c\udf7d\ufe0f **Name:** `Pasta Night`\n...",
+    "expected_stage": "created",
+    "got_stage": "created",
+    "ok": true,
+    "description": "Add meal - created"
+  },
+  {
+    "reply": "<!-- stage: collecting_info -->\n\ud83d\udcdd **Let's create a new chore!**\nWhat should we call this chore? (e.g., `Laundry`, `Take out trash`)",
+    "expected_stage": "collecting_info",
+    "got_stage": "unknown",
+    "ok": false,
+    "description": "Add chore - collecting info"
+  },
+  {
+    "reply": "<!-- stage: confirming_info -->\n\u2705 **Chore Updated!**\n\n\ud83d\udcdd **Name:** `Laundry`\n...",
+    "expected_stage": "confirming_info",
+    "got_stage": "unknown",
+    "ok": false,
+    "description": "Add chore - confirming info"
+  },
+  {
+    "reply": "<!-- stage: created -->\n\ud83c\udf89 **Chore Created!**\n\n\ud83d\udcdd **Name:** `Laundry`\n...",
+    "expected_stage": "created",
+    "got_stage": "created",
+    "ok": true,
+    "description": "Add chore - created"
+  },
+  {
+    "reply": "**Chores**\n\n| ID | Chore Name | Assigned Members | Repetition | Due Time | Type |\n|---|---|---|---|---|---|\n| 1 | Laundry | Alex | weekly | 23:59 | |",
+    "expected_stage": "other",
+    "got_stage": "unknown",
+    "ok": false,
+    "description": "Show chores - not a stage flow"
+  },
+  {
+    "reply": "**Error creating chore:** `Missing required field`",
+    "expected_stage": "error",
+    "got_stage": "unknown",
+    "ok": false,
+    "description": "Error case"
+  },
+  {
+    "reply": "<!-- stage: collecting_info -->\n\ud83c\udf73 **What kind of meal is this?**\nChoose one: `breakfast`, `lunch`, `dinner`, `snack`.",
+    "expected_stage": "collecting_info",
+    "got_stage": "unknown",
+    "ok": false,
+    "description": "Add meal - collecting_info (step 2)"
+  },
+  {
+    "reply": "<!-- stage: created -->\n\ud83c\udf89 **Meal Created!**\n\n\ud83c\udf7d\ufe0f **Name:** `Pasta Night`\n\ud83d\uddd3\ufe0f **Date:** `2023-12-01`\n\ud83c\udf73 **Kind:** `dinner`\n\ud83c\udf72 **Dishes:** `Fish Soup, Salad`\n\ud83d\udcd6 **Exists in DB:** `false`\nMeal planning complete!",
+    "expected_stage": "created",
+    "got_stage": "created",
+    "ok": true,
+    "description": "Add meal - created"
+  },
+  {
+    "reply": "<!-- stage: collecting_info -->\n\ud83d\udc64 **Who should do this chore?**\nType one or more names (e.g., `Alex, Jamie`).",
+    "expected_stage": "collecting_info",
+    "got_stage": "unknown",
+    "ok": false,
+    "description": "Add chore - collecting_info (step 2)"
+  },
+  {
+    "reply": "<!-- stage: confirming_info -->\n\u2705 **Chore Updated!**\n\n\ud83d\udcdd **Name:** `Laundry`\n\ud83d\udc64 **Assigned:** Alex\n\ud83d\udd01 **Repetition:** `weekly`\n\u23f0 **Due Time:** `23:59`\n\ud83c\udff7\ufe0f **Type:** `individual`\n\ud83d\udd14 **Reminder:** `None`\n\nUpdate complete!",
+    "expected_stage": "confirming_info",
+    "got_stage": "unknown",
+    "ok": false,
+    "description": "Add chore - confirming_info"
+  },
+  {
+    "reply": "<!-- stage: created -->\n\ud83c\udf89 **Chore Created!**\n\n\ud83d\udcdd **Name:** `Laundry`\n\ud83d\udc64 **Assigned:** Alex\n\ud83d\udcc5 **Start Date:** `2023-12-01`\n\ud83d\udd01 **Repetition:** `weekly`\n\u23f0 **Due Time:** `23:59`\n\ud83c\udff7\ufe0f **Type:** `individual`\n\ud83d\udd14 **Reminder:** `None`\n\nChore ID: `1`",
+    "expected_stage": "created",
+    "got_stage": "created",
+    "ok": true,
+    "description": "Add chore - created"
+  },
+  {
+    "reply": "<!-- stage: collecting_info -->\nWhich field would you like to edit? (e.g., `meal_name`, `meal_kind`, `meal_date`, `dishes`)",
+    "expected_stage": "collecting_info",
+    "got_stage": "unknown",
+    "ok": false,
+    "description": "Edit meal - collecting_info"
+  },
+  {
+    "reply": "<!-- stage: confirming_info -->\n\u2705 **Meal Updated!**\n\n\ud83c\udf7d\ufe0f **Name:** `Pasta Night`\n\ud83c\udf73 **Kind:** `dinner`\n\ud83d\udcc5 **Date:** `2023-12-01`\n\ud83e\udd57 **Dishes:** `Fish Soup, Salad`\n\nIf everything looks good, type **Done** to confirm or **Edit** to change anything.",
+    "expected_stage": "confirming_info",
+    "got_stage": "unknown",
+    "ok": false,
+    "description": "Edit meal - confirming_info"
+  },
+  {
+    "reply": "<!-- stage: created -->\n\ud83c\udf89 **Meal Updated!**\n\n\ud83c\udf7d\ufe0f **Name:** `Pasta Night`\n\ud83c\udf73 **Kind:** `dinner`\n\ud83d\udcc5 **Date:** `2023-12-01`\n\ud83e\udd57 **Dishes:** `Fish Soup, Salad`\n\nMeal update complete!",
+    "expected_stage": "created",
+    "got_stage": "created",
+    "ok": true,
+    "description": "Edit meal - created"
+  },
+  {
+    "reply": "**Chores**\n\n| ID | Chore Name | Assigned Members | Repetition | Due Time | Type |\n|---|---|---|---|---|---|\n| 1 | Laundry | Alex | weekly | 23:59 | individual |",
+    "expected_stage": "other",
+    "got_stage": "unknown",
+    "ok": false,
+    "description": "Show chores"
+  },
+  {
+    "reply": "**Meals**\n\n| ID | Meal Name | Kind | Date | Dishes |\n|---|---|---|---|---|\n| 1 | Pasta Night | dinner | 2023-12-01 | Fish Soup, Salad |",
+    "expected_stage": "other",
+    "got_stage": "unknown",
+    "ok": false,
+    "description": "Show meals"
+  },
+  {
+    "reply": "**Error creating chore:** `Missing required field: assigned_members`",
+    "expected_stage": "error",
+    "got_stage": "unknown",
+    "ok": false,
+    "description": "Error - missing field"
+  },
+  {
+    "reply": "**Error:** `Invalid date format. Please use YYYY-MM-DD.`",
+    "expected_stage": "error",
+    "got_stage": "unknown",
+    "ok": false,
+    "description": "Error - invalid date"
+  },
+  {
+    "reply": "Hello! How can I help you with your household tasks today?",
+    "expected_stage": "other",
+    "got_stage": "unknown",
+    "ok": false,
+    "description": "General assistant reply (not a stage flow)"
+  }
+]

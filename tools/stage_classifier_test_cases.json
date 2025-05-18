@@ -1,0 +1,42 @@
+[
+  {
+    "description": "Add meal - collecting info",
+    "reply": "<!-- stage: collecting_info -->\n🍽️ **Let's plan a meal!**\nWhat would you like to call this meal? (e.g., `Pasta Night`)",
+    "expected_stage": "collecting_info"
+  },
+  {
+    "description": "Add meal - confirming info",
+    "reply": "<!-- stage: confirming_info -->\nHere's your meal summary. Type 'Done' to confirm or provide changes.",
+    "expected_stage": "confirming_info"
+  },
+  {
+    "description": "Add meal - created",
+    "reply": "<!-- stage: created -->\n🎉 **Meal Created!**\n\n🍽️ **Name:** `Pasta Night`\n...",
+    "expected_stage": "created"
+  },
+  {
+    "description": "Add chore - collecting info",
+    "reply": "<!-- stage: collecting_info -->\n📝 **Let's create a new chore!**\nWhat should we call this chore? (e.g., `Laundry`, `Take out trash`)",
+    "expected_stage": "collecting_info"
+  },
+  {
+    "description": "Add chore - confirming info",
+    "reply": "<!-- stage: confirming_info -->\n✅ **Chore Updated!**\n\n📝 **Name:** `Laundry`\n...",
+    "expected_stage": "confirming_info"
+  },
+  {
+    "description": "Add chore - created",
+    "reply": "<!-- stage: created -->\n🎉 **Chore Created!**\n\n📝 **Name:** `Laundry`\n...",
+    "expected_stage": "created"
+  },
+  {
+    "description": "Show chores - not a stage flow",
+    "reply": "**Chores**\n\n| ID | Chore Name | Assigned Members | Repetition | Due Time | Type |\n|---|---|---|---|---|---|\n| 1 | Laundry | Alex | weekly | 23:59 | |",
+    "expected_stage": "other"
+  },
+  {
+    "description": "Error case",
+    "reply": "**Error creating chore:** `Missing required field`",
+    "expected_stage": "error"
+  }
+] 
