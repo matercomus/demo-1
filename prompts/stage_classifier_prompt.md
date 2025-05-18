@@ -1,10 +1,22 @@
-You are a classifier. Given an assistant reply, classify it into one of these stages: collecting_info, confirming_info, created, error, other.
+You are a classifier. Given an assistant reply, classify it into one of these stages: greeting, collecting_info, confirming_info, created, error, other.
 
 - Only output the stage name, nothing else.
 - Ignore markdown, lists, emojis, and polite language—focus only on the intent of the reply.
 - If the reply does not fit any of the specified stages, classify it as "other."
 
 ## Examples
+
+Reply:
+"""
+👋 Hello! How can I assist you today?
+"""
+Stage: greeting
+
+Reply:
+"""
+👋 Hi there!
+"""
+Stage: greeting
 
 Reply:
 """
@@ -26,6 +38,24 @@ Stage: confirming_info
 
 Reply:
 """
+Here is a summary of your meal. Type 'Done' to confirm or 'Edit' to change anything.
+"""
+Stage: confirming_info
+
+Reply:
+"""
+I've added 'Porridge' as a breakfast meal starting on May 19th.
+"""
+Stage: created
+
+Reply:
+"""
+I have added 'Laundry' as a new chore for you.
+"""
+Stage: created
+
+Reply:
+"""
 The chore 'Laundry' has been successfully created.
 """
 Stage: created
@@ -38,47 +68,110 @@ Stage: error
 
 Reply:
 """
+An error occurred while creating the meal. Please try again.
+"""
+Stage: error
+
+Reply:
+"""
+Here is a list of all your chores:
+- Laundry
+- Dishes
+- Trash
+"""
+Stage: other
+
+Reply:
+"""
+Your current meal plan is as follows:
+- Breakfast: Porridge
+- Lunch: Sandwich
+- Dinner: Pasta
+"""
+Stage: other
+
+Reply:
+"""
+By the way, did you know you can ask me about recipes?
+"""
+Stage: other
+
+Reply:
+"""
 {reply}
 """
 Stage:
 
-- Focus on identifying questions or prompts for more information as "collecting_info," including any initial prompts to start a task or request specific details.
-- Recognize summaries or requests for confirmation as "confirming_info," including any statements that summarize actions or request user confirmation.
-- Identify successful completion statements as "created."
-- Detect apologies, inability to perform actions, or statements indicating an error as "error."
-- Classify any other type of response that doesn't fit these categories as "other," including neutral or informational statements without a clear request or confirmation.
+- Use "greeting" for pure greetings and openers (e.g., "👋 Hello! How can I assist you today?", "👋 Hi there!"). The waving hand emoji (👋) is the stage icon for greeting.
+- Use "collecting_info" only when actively collecting information to perform a flow.
+- Use "confirming_info" for summaries, confirmations, or presenting the current state of the database.
+- Use "created" for successful completions.
+- Use "error" for errors or failures.
+- Use "other" for neutral, non-critical, or informational conversation that doesn't fit the above.
 
-- Consider any prompt that initiates a task or asks for input as "collecting_info," even if it includes emojis or structured data.
-- Recognize any statement that summarizes or asks for confirmation of details as "confirming_info," even if it includes emojis or structured data.
-- Treat any structured data presentation without a clear request or confirmation request as "other."
+## Negative Examples
 
-- Pay attention to the context of the reply, ensuring that prompts for input or task initiation are classified as "collecting_info," and summaries or requests for confirmation are classified as "confirming_info," even if they contain emojis or structured data.
+# Not collecting_info
+Reply:
+"""
+The meal 'Pasta Night' has been created successfully.
+"""
+Stage: created
 
-- Do not classify replies as "error" unless they explicitly indicate an inability to perform an action or contain an apology.
+Reply:
+"""
+Sorry, I couldn't find that member.
+"""
+Stage: error
 
-- Classify any reply that includes a prompt for user input or a question about details as "collecting_info."
-- Classify any reply that includes a summary of details or a request for confirmation as "confirming_info."
-- Classify any reply that presents data without a prompt or confirmation request as "other."
-- Classify any reply that includes an error message or apology as "error."
+# Not confirming_info
+Reply:
+"""
+Could you please provide more details about the meal?
+"""
+Stage: collecting_info
 
-- Ensure that replies with structured data followed by a prompt for confirmation or editing are classified as "confirming_info."
-- Ensure that replies with structured data without any prompt or confirmation request are classified as "other."
-- Ensure that replies with error messages, including missing fields or invalid formats, are classified as "error."
+Reply:
+"""
+The meal 'Pasta Night' has been created successfully.
+"""
+Stage: created
 
-- Ensure that replies with emojis or structured data that prompt for more information are classified as "collecting_info."
-- Ensure that replies with emojis or structured data that summarize or ask for confirmation are classified as "confirming_info."
-- Ensure that replies with structured data that do not prompt or confirm are classified as "other."
-- Ensure that replies with error messages or apologies are classified as "error."
+# Not created
+Reply:
+"""
+Could you please provide more details about the meal?
+"""
+Stage: collecting_info
 
-- Classify any reply that includes a prompt for user input or a question about details as "collecting_info," even if it includes emojis or structured data.
-- Classify any reply that includes a summary of details or a request for confirmation as "confirming_info," even if it includes emojis or structured data.
-- Classify any reply that presents structured data without a prompt or confirmation request as "other."
-- Classify any reply that includes an error message or apology as "error."
+Reply:
+"""
+Here is a summary of your new meal. Does this look correct?
+"""
+Stage: confirming_info
 
-- Ensure that replies with structured data that include a prompt for confirmation or editing are classified as "confirming_info."
-- Ensure that replies with structured data that do not include a prompt or confirmation request are classified as "other."
-- Ensure that replies with error messages, including missing fields or invalid formats, are classified as "error."
-- Ensure that replies with emojis or structured data that prompt for more information are classified as "collecting_info."
-- Ensure that replies with emojis or structured data that summarize or ask for confirmation are classified as "confirming_info."
-- Ensure that replies with structured data that do not prompt or confirm are classified as "other."
-- Ensure that replies with error messages or apologies are classified as "error."
+# Not error
+Reply:
+"""
+The meal 'Pasta Night' has been created successfully.
+"""
+Stage: created
+
+Reply:
+"""
+Could you please provide more details about the meal?
+"""
+Stage: collecting_info
+
+# Not other
+Reply:
+"""
+Sorry, I couldn't find that member.
+"""
+Stage: error
+
+Reply:
+"""
+Here is a summary of your new meal. Does this look correct?
+"""
+Stage: confirming_info

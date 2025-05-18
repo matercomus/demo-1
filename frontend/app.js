@@ -233,6 +233,18 @@ function renderStageCard(content, stage, stepInfo = null) {
     icon = '🎉';
     border = 'border-green-500';
     progress = `<div class="mb-2 text-xs text-green-700 font-semibold">Success</div>`;
+  } else if (stage === 'greeting') {
+    accent = 'border-blue-200 bg-blue-50';
+    icon = '👋';
+    border = 'border-blue-300';
+  } else if (stage === 'error') {
+    accent = 'border-red-200 bg-red-50';
+    icon = '❌';
+    border = 'border-red-400';
+  } else if (stage === 'other') {
+    accent = 'border-gray-200 bg-white';
+    icon = '💬';
+    border = 'border-gray-300';
   } else {
     accent = 'border-gray-200 bg-white';
     icon = '';
