@@ -1,6 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
-from backend.main import app
+from backend.main import app, household_agent
 from backend.agents.llm_agent import HouseholdAssistantAgent, AssistantDeps
 from pydantic_ai import capture_run_messages, models
 from pydantic_ai.models.test import TestModel
@@ -157,4 +157,26 @@ def test_multi_turn_add_meal(db_session):
             for m in messages if hasattr(m, 'parts')
             for part in m.parts if getattr(part, 'tool_name', None)
         ]
-    assert 'create_meal' in tool_calls, f"'create_meal' not found in tool calls for final turn: {tool_calls}" 
+    assert 'create_meal' in tool_calls, f"'create_meal' not found in tool calls for final turn: {tool_calls}"
+
+def test_chat_stage_marker_in_reply(db_session):
+    """
+    Test that the chat endpoint includes the stage marker in the assistant's reply
+    when collecting info for a meal creation.
+    """
+    from fastapi.testclient import TestClient
+    from backend.main import app, household_agent
+    from pydantic_ai.models.test import TestModel
+
+    # Patch the agent to use TestModel
+    household_agent.agent.model = TestModel()
+
+    client = TestClient(app)
+    resp = client.post("/chat/", json={
+        "message": "Plan a meal called Spaghetti for dinner tomorrow.",
+        "message_history": []
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    reply = data["reply"]
+    assert "<!-- stage: collecting_info" in reply, f"Stage marker not found in reply: {reply}" 

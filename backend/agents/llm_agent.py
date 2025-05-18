@@ -255,12 +255,15 @@ class HouseholdAssistantAgent:
                 missing.append("meal_kind")
             if not meal_date:
                 missing.append("meal_date")
+            if not dishes:
+                missing.append("dishes")
             if missing:
                 prompts = {
                     "meal_name": "🍽️ **Let's plan a meal!**\nWhat would you like to call this meal? (e.g., `Pasta Night`)",
                     "exist": "📖 **Is this meal already in the recipe database?**\nType `true` or `false`. If you see your meal in the suggestions, select it. Otherwise, let me know if this is a new meal.",
                     "meal_kind": "🍳 **What kind of meal is this?**\nChoose one: `breakfast`, `lunch`, `dinner`, `snack`.",
-                    "meal_date": "📅 **When do you want to have this meal?**\nFormat: YYYY-MM-DD (e.g., `2023-12-01`)."
+                    "meal_date": "📅 **When do you want to have this meal?**\nFormat: YYYY-MM-DD (e.g., `2023-12-01`).",
+                    "dishes": "🍲 **What dishes are included in this meal?**\nList one or more dishes (e.g., `Fish Soup, Salad`)."
                 }
                 next_field = missing[0]
                 summary = f"\n**So far:**\n- Name: `{meal_name or '—'}`\n- Kind: `{meal_kind or '—'}`\n- Date: `{meal_date or '—'}`\n- Dishes: `{dishes or '—'}`"
