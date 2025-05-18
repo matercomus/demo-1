@@ -4,6 +4,8 @@ from functools import lru_cache
 import logging
 import os
 from backend.agents.prompt_watcher import watch_file_for_changes
+from backend.agents.stage_keywords import STAGE_KEYWORDS_PRIORITY
+import re
 
 class StageClassifierOutput(BaseModel):
     stage: str
@@ -46,59 +48,81 @@ stage_classifier_agent = Agent(
     instructions=_stage_classifier_prompt
 )
 
+def keyword_in_text(keyword, text):
+    # Match as a whole word, ignoring case and punctuation
+    # Remove punctuation and symbols from text for matching
+    text_clean = re.sub(r'[^\w\s]', ' ', text)
+    # Use word boundaries for keywords with only word characters, else fallback to simple case-insensitive search
+    if re.match(r'^\w+$', keyword):
+        return re.search(rf'\b{re.escape(keyword)}\b', text_clean, re.IGNORECASE) is not None
+    else:
+        return re.search(re.escape(keyword), text, re.IGNORECASE) is not None
+
 @lru_cache(maxsize=128)
 def classify_stage_llm(reply: str) -> str:
     logger = logging.getLogger("stage_classifier")
     try:
         reply_lower = reply.lower()
-        if any(kw in reply_lower for kw in ["successfully created", "has been created", "has been successfully", "added", "created", "was created", "has been added"]):
-            logger.info(f"[STAGE OVERRIDE] Detected strong 'created' signal in reply: {reply}")
-            return "created"
+        for stage, keywords in STAGE_KEYWORDS_PRIORITY:
+            for kw in keywords:
+                if keyword_in_text(kw, reply_lower):
+                    logger.info(f"[STAGE OVERRIDE] Detected strong '{stage}' signal in reply: {reply} (matched phrase: '{kw}')")
+                    return stage
         logger.info(f"[STAGE PROMPT] Classifying reply: {reply}")
         result = stage_classifier_agent.run_sync({"reply": reply})
         stage = result.output.stage.strip().lower()
-        logger.info(f"[STAGE LLM] LLM output: '{stage}' for reply: {reply}")
+        logger.info(f"[STAGE LLM] Raw LLM output: '{stage}' for reply: {reply}")
         if stage not in ALLOWED_STAGES:
-            logger.warning(f"[STAGE LLM] LLM returned unknown stage '{stage}' for reply: {reply}")
-            stage = "unknown"
+            if stage == "other":
+                logger.info(f"[STAGE LLM] LLM returned 'other', mapping to 'collecting_info' for reply: {reply}")
+                stage = "collecting_info"
+            else:
+                logger.warning(f"[STAGE LLM] LLM returned unknown stage '{stage}' for reply: {reply}")
+                stage = "unknown"
+        else:
+            logger.info(f"[STAGE LLM] LLM output '{stage}' accepted for reply: {reply}")
         return stage
     except Exception as e:
         logger.warning(f"[STAGE FALLBACK] LLM failed, using heuristic. Error: {e}")
         reply_lower = reply.lower()
-        if any(word in reply_lower for word in ["what would you like", "please provide", "could you", "need", "missing", "specify", "details", "information"]):
-            return 'collecting_info'
-        elif any(word in reply_lower for word in ["confirm", "summary", "does this look", "type 'done'", "edit"]):
-            return 'confirming_info'
-        elif any(word in reply_lower for word in ["created", "success", "added", "complete", "done", "has been added", "successfully added", "added as a", "has been successfully"]):
-            return 'created'
-        elif any(word in reply_lower for word in ["error", "not found", "invalid"]):
-            return 'error'
+        for stage, keywords in STAGE_KEYWORDS_PRIORITY:
+            for word in keywords:
+                if keyword_in_text(word, reply_lower):
+                    logger.info(f"[STAGE FALLBACK] Heuristic matched '{stage}' for reply: {reply} (matched phrase: '{word}')")
+                    return stage
+        logger.info(f"[STAGE FALLBACK] No heuristic match, returning 'unknown' for reply: {reply}")
         return 'unknown'
 
 async def classify_stage_llm_async(reply: str) -> str:
     logger = logging.getLogger("stage_classifier")
     try:
         reply_lower = reply.lower()
-        if any(kw in reply_lower for kw in ["successfully created", "has been created", "has been successfully", "added", "created", "was created", "has been added"]):
-            logger.info(f"[STAGE OVERRIDE] Detected strong 'created' signal in reply: {reply}")
-            return "created"
+        for stage, keywords in STAGE_KEYWORDS_PRIORITY:
+            for kw in keywords:
+                if keyword_in_text(kw, reply_lower):
+                    logger.info(f"[STAGE OVERRIDE] Detected strong '{stage}' signal in reply: {reply} (matched phrase: '{kw}')")
+                    return stage
         logger.info(f"[STAGE PROMPT] Classifying reply: {reply}")
         result = await stage_classifier_agent.run(reply=reply)
         stage = result.output.stage.strip().lower()
-        logger.info(f"[STAGE LLM] LLM output: '{stage}' for reply: {reply}")
+        logger.info(f"[STAGE LLM] Raw LLM output: '{stage}' for reply: {reply}")
         if stage not in ALLOWED_STAGES:
-            logger.warning(f"[STAGE LLM] LLM returned unknown stage '{stage}' for reply: {reply}")
-            stage = "unknown"
+            if stage == "other":
+                logger.info(f"[STAGE LLM] LLM returned 'other', mapping to 'collecting_info' for reply: {reply}")
+                stage = "collecting_info"
+            else:
+                logger.warning(f"[STAGE LLM] LLM returned unknown stage '{stage}' for reply: {reply}")
+                stage = "unknown"
+        else:
+            logger.info(f"[STAGE LLM] LLM output '{stage}' accepted for reply: {reply}")
         return stage
     except Exception as e:
         logger.warning(f"[STAGE FALLBACK] LLM failed, using heuristic. Error: {e}")
         reply_lower = reply.lower()
-        if any(word in reply_lower for word in ["what would you like", "please provide", "could you", "need", "missing", "specify", "details", "information"]):
-            return 'collecting_info'
-        elif any(word in reply_lower for word in ["confirm", "summary", "does this look", "type 'done'", "edit"]):
-            return 'confirming_info'
-        elif any(word in reply_lower for word in ["created", "success", "added", "complete", "done", "has been added", "successfully added", "added as a", "has been successfully"]):
-            return 'created'
-        elif any(word in reply_lower for word in ["error", "not found", "invalid"]):
-            return 'error'
+        for stage, keywords in STAGE_KEYWORDS_PRIORITY:
+            for word in keywords:
+                if keyword_in_text(word, reply_lower):
+                    logger.info(f"[STAGE FALLBACK] Heuristic matched '{stage}' for reply: {reply} (matched phrase: '{word}')")
+                    return stage
+        logger.info(f"[STAGE FALLBACK] No heuristic match, returning 'unknown' for reply: {reply}")
         return 'unknown' 

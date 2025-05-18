@@ -142,14 +142,14 @@ class HouseholdAssistantAgent:
             db = ctx.deps.db
             chores = chore_crud.get_chores(db)
             if not chores:
-                return "No chores found."
+                return "<!-- stage: confirming_info -->\nNo chores found."
             # Markdown table
             header = '| ID | Chore Name | Assigned Members | Repetition | Due Time | Type |\n|---|---|---|---|---|---|'
             rows = [
                 f"| {c.id} | {c.chore_name} | {', '.join(str(m) for m in c.assigned_members)} | {c.repetition} | {c.due_time} | {c.type or ''} |"
                 for c in chores
             ]
-            return f"**Chores**\n\n{header}\n" + "\n".join(rows)
+            return f"<!-- stage: confirming_info -->\n**Chores**\n\n{header}\n" + "\n".join(rows)
 
         @self.agent.tool
         async def update_chore(ctx: RunContext[AssistantDeps], id: int, **kwargs):
@@ -160,7 +160,7 @@ class HouseholdAssistantAgent:
             db = ctx.deps.db
             c = chore_crud.get_chore(db, id)
             if not c:
-                return f"<!-- stage: collecting_info -->\nChore with ID `{id}` not found. Please provide a valid chore ID."
+                return f"<!-- stage: error -->\nChore with ID `{id}` not found. Please provide a valid chore ID."
             import re
             new_name = kwargs.get("chore_name")
             if not new_name:
@@ -208,7 +208,7 @@ class HouseholdAssistantAgent:
         async def delete_chore(ctx: RunContext[AssistantDeps], id: int):
             db = ctx.deps.db
             ok = chore_crud.delete_chore(db, id)
-            return f"Chore {id} deleted." if ok else f"Chore {id} not found."
+            return f"Chore {id} deleted." if ok else f"<!-- stage: error -->\nChore {id} not found."
 
         @self.agent.tool
         async def create_meal(ctx: RunContext[AssistantDeps], meal_name: str = None, exist: bool = None, meal_kind: str = None, meal_date: str = None, dishes: str = None):
@@ -225,8 +225,8 @@ class HouseholdAssistantAgent:
                     # If all other fields are present, default to False
                     if meal_name and meal_kind and meal_date:
                         exist = False
-                    else:
-                        missing.append("exist")
+                if exist is None:
+                    missing.append("exist")
             if not meal_kind:
                 missing.append("meal_kind")
             if not meal_date:
@@ -273,20 +273,20 @@ class HouseholdAssistantAgent:
             db = ctx.deps.db
             meals = meal_crud.get_meals(db)
             if not meals:
-                return "No meals found."
+                return "<!-- stage: confirming_info -->\nNo meals found."
             header = '| ID | Meal Name | Kind | Date | Dishes |\n|---|---|---|---|---|'
             rows = [
                 f"| {m.id} | {m.meal_name} | {m.meal_kind} | {m.meal_date} | {', '.join(m.dishes) if m.dishes else ''} |"
                 for m in meals
             ]
-            return f"**Meals**\n\n{header}\n" + "\n".join(rows)
+            return f"<!-- stage: confirming_info -->\n**Meals**\n\n{header}\n" + "\n".join(rows)
 
         @self.agent.tool
         async def update_meal(ctx: RunContext[AssistantDeps], id: int, **kwargs):
             db = ctx.deps.db
             m = meal_crud.get_meal(db, id)
             if not m:
-                return f"<!-- stage: collecting_info -->\nMeal with ID `{id}` not found. Please provide a valid meal ID."
+                return f"<!-- stage: error -->\nMeal with ID `{id}` not found. Please provide a valid meal ID."
             data = {k: kwargs[k] for k in kwargs if k in MealCreate.model_fields}
             if "dishes" in data and isinstance(data["dishes"], str):
                 data["dishes"] = [data["dishes"]]
@@ -306,7 +306,7 @@ class HouseholdAssistantAgent:
         async def delete_meal(ctx: RunContext[AssistantDeps], id: int):
             db = ctx.deps.db
             ok = meal_crud.delete_meal(db, id)
-            return f"Meal {id} deleted." if ok else f"Meal {id} not found."
+            return f"Meal {id} deleted." if ok else f"<!-- stage: error -->\nMeal {id} not found."
 
         @self.agent.tool
         async def create_member(ctx: RunContext[AssistantDeps], name: str = None, gender: Optional[str] = None, avatar: Optional[str] = None):
@@ -329,20 +329,20 @@ class HouseholdAssistantAgent:
             db = ctx.deps.db
             members = member_crud.get_members(db)
             if not members:
-                return "No family members found."
+                return "<!-- stage: confirming_info -->\nNo family members found."
             header = '| ID | Name | Gender | Avatar |\n|---|---|---|---|'
             rows = [
                 f"| {m.id} | {m.name} | {m.gender or ''} | {m.avatar or ''} |"
                 for m in members
             ]
-            return f"**Family Members**\n\n{header}\n" + "\n".join(rows)
+            return f"<!-- stage: confirming_info -->\n**Family Members**\n\n{header}\n" + "\n".join(rows)
 
         @self.agent.tool
         async def update_member(ctx: RunContext[AssistantDeps], id: int, **kwargs):
             db = ctx.deps.db
             m = member_crud.get_member(db, id)
             if not m:
-                return f"<!-- stage: collecting_info -->\nMember with ID `{id}` not found. Please provide a valid member ID."
+                return f"<!-- stage: error -->\nMember with ID `{id}` not found. Please provide a valid member ID."
             data = {k: kwargs[k] for k in kwargs if k in FamilyMemberCreate.model_fields}
             member = FamilyMemberCreate(**{**m.__dict__, **data})
             updated = member_crud.update_member(db, id, member)
@@ -359,20 +359,20 @@ class HouseholdAssistantAgent:
         async def delete_member(ctx: RunContext[AssistantDeps], id: int):
             db = ctx.deps.db
             ok = member_crud.delete_member(db, id)
-            return f"Member {id} deleted." if ok else f"Member {id} not found."
+            return f"Member {id} deleted." if ok else f"<!-- stage: error -->\nMember {id} not found."
 
         @self.agent.tool
         async def list_recipes(ctx: RunContext[AssistantDeps]):
             db = ctx.deps.db
             recipes = recipe_crud.get_recipes(db)
             if not recipes:
-                return "No recipes found."
+                return "<!-- stage: confirming_info -->\nNo recipes found."
             header = '| ID | Name | Kind | Description |\n|---|---|---|---|'
             rows = [
                 f"| {r.id} | {r.name} | {r.kind} | {r.description or ''} |"
                 for r in recipes
             ]
-            return f"**Recipes**\n\n{header}\n" + "\n".join(rows)
+            return f"<!-- stage: confirming_info -->\n**Recipes**\n\n{header}\n" + "\n".join(rows)
 
         @self.agent.tool
         async def create_recipe(ctx: RunContext[AssistantDeps], name: str = None, kind: str = None, description: str = ""):
@@ -397,7 +397,7 @@ class HouseholdAssistantAgent:
             db = ctx.deps.db
             r = recipe_crud.get_recipe(db, id)
             if not r:
-                return f"<!-- stage: collecting_info -->\nRecipe with ID `{id}` not found. Please provide a valid recipe ID."
+                return f"<!-- stage: error -->\nRecipe with ID `{id}` not found. Please provide a valid recipe ID."
             data = {k: kwargs[k] for k in kwargs if k in RecipeCreate.model_fields}
             recipe = RecipeCreate(**{**r.__dict__, **data})
             updated = recipe_crud.update_recipe(db, id, recipe)
@@ -414,4 +414,4 @@ class HouseholdAssistantAgent:
         async def delete_recipe(ctx: RunContext[AssistantDeps], id: int):
             db = ctx.deps.db
             ok = recipe_crud.delete_recipe(db, id)
-            return f"Recipe {id} deleted." if ok else f"Recipe {id} not found."
+            return f"Recipe {id} deleted." if ok else f"<!-- stage: error -->\nRecipe {id} not found."
