@@ -947,6 +947,7 @@ function handleChatSubmit(e) {
           console.error('Failed to parse data:', data);
         }
       }
+      console.log('[STAGE CLASSIFIER] Final stage:', data.stage, '| Reply:', data.reply);
       if (data && data.reply) {
         chatMessages.push({ role: 'bot', content: data.reply, stage: data.stage });
       } else {

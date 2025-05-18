@@ -132,7 +132,7 @@ class HouseholdAssistantAgent:
                 # Show summary of collected so far
                 summary = []
                 if chore_name: summary.append(f"📝 Name: `{chore_name}`")
-                if assigned_members: summary.append(f"👤 Assigned: {', '.join(assigned_members)}")
+                if assigned_members: summary.append(f"👤 Assigned: {', '.join(str(m) for m in assigned_members)}")
                 if start_date: summary.append(f"📅 Start: `{start_date}`")
                 if repetition: summary.append(f"🔁 Repeats: `{repetition}`")
                 summary_md = "\n".join(summary)
@@ -153,7 +153,7 @@ class HouseholdAssistantAgent:
                     "<!-- stage: created -->\n"
                     "🎉 **Chore Created!**\n\n"
                     f"📝 **Name:** `{chore_name}`\n"
-                    f"👤 **Assigned:** {', '.join(assigned_members)}\n"
+                    f"👤 **Assigned:** {', '.join(str(m) for m in assigned_members)}\n"
                     f"📅 **Start Date:** `{start_date}`\n"
                     f"🔁 **Repetition:** `{repetition}`\n"
                     f"⏰ **Due Time:** `{due_time or '23:59'}`\n"
@@ -173,7 +173,7 @@ class HouseholdAssistantAgent:
             # Markdown table
             header = '| ID | Chore Name | Assigned Members | Repetition | Due Time | Type |\n|---|---|---|---|---|---|'
             rows = [
-                f"| {c.id} | {c.chore_name} | {c.assigned_members} | {c.repetition} | {c.due_time} | {c.type or ''} |"
+                f"| {c.id} | {c.chore_name} | {', '.join(str(m) for m in c.assigned_members)} | {c.repetition} | {c.due_time} | {c.type or ''} |"
                 for c in chores
             ]
             return f"**Chores**\n\n{header}\n" + "\n".join(rows)
@@ -217,7 +217,7 @@ class HouseholdAssistantAgent:
                     "<!-- stage: confirming_info -->\n"
                     f"✅ **Chore Updated!**\n\n"
                     f"📝 **Name:** `{chore.chore_name}`\n"
-                    f"👤 **Assigned:** {', '.join(chore.assigned_members)}\n"
+                    f"👤 **Assigned:** {', '.join(str(m) for m in chore.assigned_members)}\n"
                     f"🔁 **Repetition:** `{chore.repetition}`\n"
                     f"⏰ **Due Time:** `{chore.due_time}`\n"
                     f"🏷️ **Type:** `{chore.type or ''}`\n"
@@ -228,7 +228,7 @@ class HouseholdAssistantAgent:
             return (
                 "<!-- stage: collecting_info -->\n"
                 "I need more information to update this chore. Please specify what you want to change.\n\n"
-                f"Current values:\n- Name: `{c.chore_name}`\n- Assigned: {c.assigned_members}\n- Repetition: `{c.repetition}`\n- Due Time: `{c.due_time}`\n- Type: `{c.type or ''}`\n- Reminder: `{c.reminder or 'None'}`"
+                f"Current values:\n- Name: `{c.chore_name}`\n- Assigned: {', '.join(str(m) for m in c.assigned_members)}\n- Repetition: `{c.repetition}`\n- Due Time: `{c.due_time}`\n- Type: `{c.type or ''}`\n- Reminder: `{c.reminder or 'None'}`"
             )
 
         @self.agent.tool
