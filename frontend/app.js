@@ -228,6 +228,11 @@ function renderStageCard(content, stage, stepInfo = null) {
     if (stepInfo) {
       progress = `<div class="mb-2 text-xs text-yellow-700 font-semibold">Confirmation</div>`;
     }
+  } else if (stage === 'confirming_removal') {
+    accent = 'border-red-200 bg-red-50';
+    icon = '🗑️';
+    border = 'border-red-400';
+    progress = `<div class="mb-2 text-xs text-red-700 font-semibold">Confirm Removal</div>`;
   } else if (stage === 'created') {
     accent = 'border-green-400 bg-green-50';
     icon = '🎉';

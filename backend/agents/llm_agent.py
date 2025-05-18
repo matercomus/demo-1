@@ -205,8 +205,10 @@ class HouseholdAssistantAgent:
             )
 
         @self.agent.tool
-        async def delete_chore(ctx: RunContext[AssistantDeps], id: int):
+        async def delete_chore(ctx: RunContext[AssistantDeps], id: int, confirm: bool = False):
             db = ctx.deps.db
+            if not confirm:
+                return "<!-- stage: confirming_removal -->\nAre you sure you want to delete this chore? This action cannot be undone. Type 'Yes' to confirm."
             ok = chore_crud.delete_chore(db, id)
             return f"Chore {id} deleted." if ok else f"<!-- stage: error -->\nChore {id} not found."
 
@@ -303,8 +305,10 @@ class HouseholdAssistantAgent:
             )
 
         @self.agent.tool
-        async def delete_meal(ctx: RunContext[AssistantDeps], id: int):
+        async def delete_meal(ctx: RunContext[AssistantDeps], id: int, confirm: bool = False):
             db = ctx.deps.db
+            if not confirm:
+                return "<!-- stage: confirming_removal -->\nAre you sure you want to delete this meal? This action cannot be undone. Type 'Yes' to confirm."
             ok = meal_crud.delete_meal(db, id)
             return f"Meal {id} deleted." if ok else f"<!-- stage: error -->\nMeal {id} not found."
 
@@ -356,8 +360,10 @@ class HouseholdAssistantAgent:
             )
 
         @self.agent.tool
-        async def delete_member(ctx: RunContext[AssistantDeps], id: int):
+        async def delete_member(ctx: RunContext[AssistantDeps], id: int, confirm: bool = False):
             db = ctx.deps.db
+            if not confirm:
+                return "<!-- stage: confirming_removal -->\nAre you sure you want to delete this member? This action cannot be undone. Type 'Yes' to confirm."
             ok = member_crud.delete_member(db, id)
             return f"Member {id} deleted." if ok else f"<!-- stage: error -->\nMember {id} not found."
 
@@ -411,7 +417,9 @@ class HouseholdAssistantAgent:
             )
 
         @self.agent.tool
-        async def delete_recipe(ctx: RunContext[AssistantDeps], id: int):
+        async def delete_recipe(ctx: RunContext[AssistantDeps], id: int, confirm: bool = False):
             db = ctx.deps.db
+            if not confirm:
+                return "<!-- stage: confirming_removal -->\nAre you sure you want to delete this recipe? This action cannot be undone. Type 'Yes' to confirm."
             ok = recipe_crud.delete_recipe(db, id)
             return f"Recipe {id} deleted." if ok else f"<!-- stage: error -->\nRecipe {id} not found."
