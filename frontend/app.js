@@ -10,6 +10,11 @@ let stepError = '';
 let chatMessages = [];
 let chatLoading = false;
 let chatError = '';
+if (typeof window !== 'undefined') {
+  window.pendingRemoval = null;
+} else if (typeof globalThis !== 'undefined') {
+  globalThis.pendingRemoval = null;
+}
 
 if (typeof window !== 'undefined' && !window.marked) {
   const script = document.createElement('script');
@@ -906,9 +911,10 @@ function renderChatUI() {
         ${chatLoading ? '<div class="flex items-center gap-2 text-gray-500"><svg class="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path></svg> Assistant is typing...</div>' : ''}
       </div>
       <form id="chatForm" class="flex gap-2">
-        <input id="chatInput" class="flex-1 px-3 py-2 rounded border border-gray-300 focus:border-blue-500" type="text" placeholder="Type your message..." autocomplete="off" ${chatLoading ? 'disabled' : ''} />
+        <input id="chatInput" class="flex-1 px-3 py-2 rounded border border-gray-300 focus:border-blue-500" type="text" placeholder="Type your message..." autocomplete="off" ${chatLoading ? 'disabled' : ''} ${window.pendingRemoval ? '' : ''} />
         <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded shadow hover:bg-blue-700 transition" ${chatLoading ? 'disabled' : ''}>Send</button>
       </form>
+      ${window.pendingRemoval ? `<div class='text-red-600 mt-2'>Please type <b>yes</b> to confirm or <b>no</b> to cancel.</div>` : ''}
       ${chatError ? `<div class='text-red-600 mt-2'>${chatError}</div>` : ''}
     </div>
   `;
@@ -937,6 +943,98 @@ function handleChatSubmit(e) {
   const msg = input.value.trim();
   if (!msg || chatLoading) return;
   input.value = '';
+
+  // Step 4: Handle destructive confirmation
+  const _pendingRemoval = (typeof window !== 'undefined') ? window.pendingRemoval : globalThis.pendingRemoval;
+  if (_pendingRemoval) {
+    if (/^yes$/i.test(msg)) {
+      // User confirmed, send original destructive command to backend
+      chatMessages.push({ role: 'user', content: msg });
+      chatLoading = true;
+      chatError = '';
+      renderMenu();
+      scrollChatToBottom();
+      fetch('http://localhost:8000/chat/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: _pendingRemoval.originalMessage,
+          message_history: chatMessages.map(m => ({
+            role: m.role === 'bot' ? 'assistant' : m.role,
+            content: m.content
+          }))
+        })
+      })
+        .then(res => res.json())
+        .then(data => {
+          if (typeof data === 'string') {
+            try { data = JSON.parse(data); } catch (e) {}
+          }
+          if (data && data.reply) {
+            chatMessages.push({ role: 'bot', content: data.reply, stage: data.stage });
+          } else {
+            chatMessages.push({ role: 'bot', content: 'Sorry, I did not understand that.', stage: 'error' });
+          }
+          chatLoading = false;
+          if (typeof window !== 'undefined') window.pendingRemoval = null;
+          else if (typeof globalThis !== 'undefined') globalThis.pendingRemoval = null;
+          renderMenu();
+          scrollChatToBottom();
+        })
+        .catch(err => {
+          chatError = 'Error contacting assistant.';
+          chatLoading = false;
+          if (typeof window !== 'undefined') window.pendingRemoval = null;
+          else if (typeof globalThis !== 'undefined') globalThis.pendingRemoval = null;
+          renderMenu();
+        });
+      return;
+    } else if (/^no$/i.test(msg)) {
+      // User cancelled
+      chatMessages.push({ role: 'user', content: msg });
+      chatMessages.push({ role: 'bot', content: 'Deletion cancelled.', stage: 'other' });
+      if (typeof window !== 'undefined') window.pendingRemoval = null;
+      else if (typeof globalThis !== 'undefined') globalThis.pendingRemoval = null;
+      renderMenu();
+      scrollChatToBottom();
+      return;
+    } else {
+      // Re-prompt
+      chatMessages.push({ role: 'user', content: msg });
+      // Always push the bot re-prompt
+      chatMessages.push({ role: 'bot', content: 'Please type "yes" to confirm or "no" to cancel.', stage: 'confirming_removal', destructive: true });
+      renderMenu();
+      scrollChatToBottom();
+      return;
+    }
+  }
+
+  // Step 1: Pattern-match destructive commands
+  const destructivePatterns = [
+    { regex: /^delete\s+meal\s+(\d+)/i, type: 'meal' },
+    { regex: /^remove\s+meal\s+(\d+)/i, type: 'meal' },
+    { regex: /^delete\s+chore\s+(\d+)/i, type: 'chore' },
+    { regex: /^remove\s+chore\s+(\d+)/i, type: 'chore' },
+    { regex: /^delete\s+recipe\s+(\d+)/i, type: 'recipe' },
+    { regex: /^remove\s+recipe\s+(\d+)/i, type: 'recipe' },
+    { regex: /^delete\s+member\s+(\d+)/i, type: 'member' },
+    { regex: /^remove\s+member\s+(\d+)/i, type: 'member' },
+  ];
+  let matched = null;
+  for (const pat of destructivePatterns) {
+    const m = msg.match(pat.regex);
+    if (m) {
+      matched = { type: pat.type, id: m[1], originalMessage: msg };
+      break;
+    }
+  }
+  if (matched) {
+    if (typeof window !== 'undefined') window.pendingRemoval = matched;
+    chatMessages.push({ role: 'user', content: msg });
+    renderDestructiveConfirmation();
+    return;
+  }
+
   chatMessages.push({ role: 'user', content: msg });
   chatLoading = true;
   chatError = '';
@@ -965,6 +1063,33 @@ function handleChatSubmit(e) {
         }
       }
       console.log('[STAGE CLASSIFIER] Final stage:', data.stage, '| Reply:', data.reply);
+      // Step 3: Intercept LLM confirming_removal
+      if (data && data.stage === 'confirming_removal' && !window.pendingRemoval) {
+        // Try to extract entity and id from last user message
+        const lastUserMsg = chatMessages.slice().reverse().find(m => m.role === 'user');
+        let type = 'item', id = '?';
+        if (lastUserMsg) {
+          const destructivePatterns = [
+            { regex: /meal\s+(\d+)/i, type: 'meal' },
+            { regex: /chore\s+(\d+)/i, type: 'chore' },
+            { regex: /recipe\s+(\d+)/i, type: 'recipe' },
+            { regex: /member\s+(\d+)/i, type: 'member' },
+          ];
+          for (const pat of destructivePatterns) {
+            const m = lastUserMsg.content.match(pat.regex);
+            if (m) {
+              type = pat.type;
+              id = m[1];
+              break;
+            }
+          }
+        }
+        window.pendingRemoval = { type, id, originalMessage: lastUserMsg ? lastUserMsg.content : '' };
+        chatMessages.push({ role: 'bot', content: data.reply, stage: 'confirming_removal', destructive: true });
+        renderMenu();
+        scrollChatToBottom();
+        return;
+      }
       if (data && data.reply) {
         chatMessages.push({ role: 'bot', content: data.reply, stage: data.stage });
       } else {
@@ -977,8 +1102,21 @@ function handleChatSubmit(e) {
     .catch(err => {
       chatError = 'Error contacting assistant.';
       chatLoading = false;
+      if (typeof window !== 'undefined') window.pendingRemoval = null;
+      else if (typeof globalThis !== 'undefined') globalThis.pendingRemoval = null;
       renderMenu();
     });
+}
+
+function renderDestructiveConfirmation() {
+  const _pendingRemoval = (typeof window !== 'undefined') ? window.pendingRemoval : globalThis.pendingRemoval;
+  if (!_pendingRemoval) return;
+  const { type, id, originalMessage } = _pendingRemoval;
+  const entity = type.charAt(0).toUpperCase() + type.slice(1);
+  const content = `Are you sure you want to delete ${entity} ${id}? Type <b>yes</b> to confirm or <b>no</b> to cancel.`;
+  chatMessages.push({ role: 'bot', content, stage: 'confirming_removal', destructive: true });
+  renderMenu();
+  scrollChatToBottom();
 }
 
 function renderCreateRecipe() {
@@ -1028,3 +1166,17 @@ function renderCreateRecipe() {
 
 // Initial render
 renderMenu();
+
+// Export for testing
+module.exports = {
+  handleChatSubmit,
+  chatMessages,
+  renderMenu,
+  get pendingRemoval() {
+    return (typeof window !== 'undefined') ? window.pendingRemoval : globalThis.pendingRemoval;
+  },
+  set pendingRemoval(val) {
+    if (typeof window !== 'undefined') window.pendingRemoval = val;
+    else if (typeof globalThis !== 'undefined') globalThis.pendingRemoval = val;
+  },
+};

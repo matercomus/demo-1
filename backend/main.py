@@ -270,8 +270,7 @@ def chore_step(req: ChoreStepRequest, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(db_chore)
     except Exception as e:
-        print('Chore step error:', e)
-        traceback.print_exc()
+        logger.error(f'Chore step error: {e}', exc_info=True)
         return {"stage": "error", "message": str(e)}
     return {
         "stage": "created",
@@ -357,8 +356,7 @@ def meal_step(req: MealStepRequest, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(db_meal)
     except Exception as e:
-        print('Meal step error:', e)
-        traceback.print_exc()
+        logger.error(f'Meal step error: {e}', exc_info=True)
         return {"stage": "error", "message": str(e)}
     return {
         "stage": "created",
