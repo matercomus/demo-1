@@ -24,6 +24,8 @@ import os
 import openai
 from functools import lru_cache
 from backend.agents.stage_classifier import classify_stage_llm, classify_stage_llm_async
+from dotenv import load_dotenv
+load_dotenv()
 
 setup_logging()
 logger = get_logger(__name__)
