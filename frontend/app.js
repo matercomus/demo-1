@@ -141,7 +141,7 @@ function getDisabledAttrs(loading) {
 
 // Patch step to store lastStepData for suggestions
 let step = async function(userInput = null, confirm = false) {
-  const endpoint = mode === 'chore' ? '/chore/step' : '/meal/step';
+  const endpoint = mode === 'chore' ? '/backend/chore/step' : '/backend/meal/step';
   const payload = { current_data: currentData };
   if (userInput) payload.user_input = userInput;
   if (confirm) payload.confirm = true;
@@ -149,7 +149,7 @@ let step = async function(userInput = null, confirm = false) {
   stepError = '';
   renderStepStage();
   try {
-    const res = await fetch(`http://localhost:8000${endpoint}`, {
+    const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -595,16 +595,16 @@ async function fetchAndShowList(listMode) {
   stepError = '';
   let endpoint, label;
   if (listMode === 'chore') {
-    endpoint = '/chores';
+    endpoint = '/backend/chores';
     label = 'Chores';
   } else if (listMode === 'meal') {
-    endpoint = '/meals';
+    endpoint = '/backend/meals';
     label = 'Meals';
   } else if (listMode === 'recipe') {
-    endpoint = '/recipes';
+    endpoint = '/backend/recipes';
     label = 'Recipes';
   }
-  const res = await fetch(`http://localhost:8000${endpoint}`);
+  const res = await fetch(endpoint);
   const data = await res.json();
   app.innerHTML = `
     <h2 class="text-xl font-semibold text-blue-700 mb-4">All ${label}</h2>
@@ -642,7 +642,7 @@ async function renderEditMembers() {
   // Fetch members from backend
   async function fetchMembers() {
     try {
-      const res = await fetch('http://localhost:8000/members');
+      const res = await fetch('/backend/members');
       if (!res.ok) throw new Error('Failed to fetch members');
       return await res.json();
     } catch (e) {
@@ -816,14 +816,14 @@ async function renderEditMembers() {
           loading = true;
           renderPage();
           if (editingId) {
-            await fetch(`http://localhost:8000/members/${editingId}`, {
+            await fetch('/backend/members/' + editingId, {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(confirmData)
             });
             message = 'Family member updated!';
           } else {
-            await fetch('http://localhost:8000/members', {
+            await fetch('/backend/members', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(confirmData)
@@ -860,7 +860,7 @@ async function renderEditMembers() {
           try {
             loading = true;
             renderPage();
-            await fetch(`http://localhost:8000/members/${id}`, { method: 'DELETE' });
+            await fetch('/backend/members/' + id, { method: 'DELETE' });
             await refreshMembers();
           } catch (e) {
             error = 'Failed to delete family member.';
@@ -943,7 +943,7 @@ function handleChatSubmit(e) {
   renderMenu();
   scrollChatToBottom();
   // Send to backend with full message history
-  fetch('http://localhost:8000/chat/', {
+  fetch('/backend/chat/', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -1012,7 +1012,7 @@ function renderCreateRecipe() {
     const name = document.getElementById('recipeName').value;
     const kind = document.getElementById('recipeKind').value;
     const description = document.getElementById('recipeDescription').value;
-    const res = await fetch('http://localhost:8000/recipes', {
+    const res = await fetch('/backend/recipes', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, kind, description })
