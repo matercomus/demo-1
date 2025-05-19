@@ -12,3 +12,4 @@ wheels/
 .vscode/settings.json
 products.db
 test_products.db
+tempServerKey.pem
