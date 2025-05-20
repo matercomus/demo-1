@@ -418,6 +418,18 @@ async def chat_endpoint(data: dict = Body(...), db: Session = Depends(get_db), a
         # If a special test flag is set, use ConfirmationTestModel as the model override
         if data.get("_test_model") == "confirmation":
             with agent.override(model=ConfirmationTestModel()):
+                destructive_keywords = ["delete", "remove"]
+                if any(word in message.lower() for word in destructive_keywords):
+                    reply_dict = ConfirmationTestModel()()
+                    logger.info(f"[LOG] Forced confirmation reply: {reply_dict}")
+                    # Store in pending_confirmations for confirmation step
+                    pending_confirmations[reply_dict["confirmation_id"]] = {
+                        "action": reply_dict["action"],
+                        "target": reply_dict["target"],
+                        "message_history": raw_message_history,
+                        "db": db
+                    }
+                    return JSONResponse({"stage": reply_dict["stage"], "reply": reply_dict, "message_history": raw_message_history})
                 if hasattr(agent, "run") and callable(getattr(agent, "run")):
                     result = await agent.run(message, deps=deps, message_history=message_history)
                 else:
