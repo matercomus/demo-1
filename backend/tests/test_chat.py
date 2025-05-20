@@ -26,7 +26,9 @@ def test_chat_prompt_tools(prompt, expected_tool, db_session):
     """
     Test that prompts trigger the correct tool call using capture_run_messages and TestModel.
     """
-    agent = HouseholdAssistantAgent().agent
+    agent_owner = HouseholdAssistantAgent()
+    agent_owner.propagate_model_override(TestModel())
+    agent = agent_owner.agent
     deps = AssistantDeps(db=db_session)
     message_history = []
     with agent.override(model=TestModel()):
@@ -42,13 +44,15 @@ def test_agent_tools_direct(db_session):
     """
     from backend.agents.llm_agent import HouseholdAssistantAgent, AssistantDeps
     import asyncio
-    agent = HouseholdAssistantAgent()
+    agent_owner = HouseholdAssistantAgent()
+    agent_owner.propagate_model_override(TestModel())
+    agent = agent_owner.agent
     deps = AssistantDeps(db=db_session)
 
     async def run_agent(prompt, message_history):
-        with agent.agent.override(model=TestModel()):
+        with agent.override(model=TestModel()):
             with capture_run_messages() as messages:
-                await agent.agent.run(prompt, deps=deps, message_history=message_history)
+                await agent.run(prompt, deps=deps, message_history=message_history)
             return messages
 
     async def flow():
@@ -143,7 +147,9 @@ def test_multi_turn_add_meal(db_session):
     """
     from backend.agents.llm_agent import HouseholdAssistantAgent, AssistantDeps
     from pydantic_ai.messages import ModelRequest, UserPromptPart
-    agent = HouseholdAssistantAgent().agent
+    agent_owner = HouseholdAssistantAgent()
+    agent_owner.propagate_model_override(TestModel())
+    agent = agent_owner.agent
     deps = AssistantDeps(db=db_session)
     message_history = []
     user_turns = [
@@ -177,8 +183,9 @@ def test_chat_stage_marker_in_reply(db_session):
     from backend.main import app, get_household_agent
     from pydantic_ai.models.test import TestModel
 
-    # Patch the agent to use TestModel
-    get_household_agent().agent.model = TestModel()
+    # Patch the agent and all sub-agents to use TestModel
+    agent_owner = get_household_agent()
+    agent_owner.propagate_model_override(TestModel())
 
     client = TestClient(app)
     resp = client.post("/chat/", json={
@@ -495,7 +502,10 @@ def test_destructive_tool_call_capture(db_session):
     """
     from backend.agents.llm_agent import HouseholdAssistantAgent, AssistantDeps
     from pydantic_ai import capture_run_messages
-    agent = HouseholdAssistantAgent().agent
+    from pydantic_ai.models.test import TestModel
+    agent_owner = HouseholdAssistantAgent()
+    agent_owner.propagate_model_override(TestModel())
+    agent = agent_owner.agent
     deps = AssistantDeps(db=db_session)
     meal_id = 42
     destructive_phrases = [
@@ -510,6 +520,7 @@ def test_destructive_tool_call_capture(db_session):
         with agent.override(model=TestModel()):
             with capture_run_messages() as messages:
                 agent.run_sync(phrase, deps=deps, message_history=[])
+            from pydantic_ai.messages import ToolCallPart
             tool_calls = [part for m in messages for part in getattr(m, 'parts', []) if isinstance(part, ToolCallPart)]
             delete_meal_calls = [part for part in tool_calls if part.tool_name == 'delete_meal']
             assert delete_meal_calls, f"No delete_meal tool call for phrase: {phrase}"

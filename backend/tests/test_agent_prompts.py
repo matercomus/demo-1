@@ -12,7 +12,10 @@ models.ALLOW_MODEL_REQUESTS = False
 
 @pytest.fixture(scope="module")
 def agent():
-    return HouseholdAssistantAgent().agent
+    agent_owner = HouseholdAssistantAgent()
+    from pydantic_ai.models.test import TestModel
+    agent_owner.propagate_model_override(TestModel())
+    return agent_owner.agent
 
 @pytest.fixture
 def deps():
