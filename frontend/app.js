@@ -908,6 +908,21 @@ async function renderEditMembers() {
 }
 
 // --- Chat UI Functions ---
+function parseIDOptionsFromMessage(message) {
+  // Try to extract options from a message like:
+  // 'Please specify the ID of the chore you want to remove: 1. Assigned to Tomek 2. Assigned to Matt ...'
+  const match = message.match(/specify the ID[^:]*:([\s\S]*)/i);
+  if (!match) return null;
+  const optionsText = match[1];
+  // Split by number-dot pattern (e.g., '1. Assigned...')
+  const optionRegex = /([0-9]+)\.\s*([^0-9]+)/g;
+  let m, options = [];
+  while ((m = optionRegex.exec(optionsText)) !== null) {
+    options.push({ id: m[1], label: m[2].trim() });
+  }
+  return options.length > 0 ? options : null;
+}
+
 function renderChatUI() {
   // Chat container, now stretches more
   const chatBox = `
@@ -915,12 +930,19 @@ function renderChatUI() {
       <h2 class="text-lg font-semibold text-gray-700 mb-2">🤖 Assistant Chat</h2>
       <div id="chatHistory" class="flex-1 bg-gray-100 rounded-lg p-4 overflow-y-auto mb-2 border border-gray-200">
         ${chatMessages.length === 0 ? '<div class="text-gray-400 text-center">No messages yet. Say hello!</div>' :
-          chatMessages.map(m => {
+          chatMessages.map((m, i) => {
             if (m.role === 'bot') {
               // Use the stage field for card styling
               if (m.stage && m.stage !== 'unknown') {
                 // Special style for destructive confirmation
                 if (m.stage === 'confirming_removal') {
+                  // Try to parse ID options
+                  const options = parseIDOptionsFromMessage(m.content);
+                  if (options) {
+                    // Render buttons for each ID
+                    return `<div class="mb-4 w-full flex justify-start"><div class="w-full">${renderStageCard(`<span class='font-bold text-red-700'>${window.marked ? window.marked.parse(m.content) : m.content}</span><div class='mt-2 text-sm text-red-600'>Select the item to delete:</div><div class='flex flex-col gap-2 mt-2'>${options.map(opt => `<button class='px-4 py-2 bg-red-600 text-white rounded' data-id-select='${opt.id}'>ID: ${opt.id} - ${opt.label}</button>`).join('')}</div>`, 'confirming_removal', null)}</div></div>`;
+                  }
+                  // Fallback: normal confirmation
                   return `<div class="mb-4 w-full flex justify-start"><div class="w-full">${renderStageCard(`<span class='font-bold text-red-700'>${window.marked ? window.marked.parse(m.content) : m.content}</span><div class='mt-2 text-sm text-red-600'>Please type <b>yes</b> to confirm or <b>no</b> to cancel.</div>`, 'confirming_removal', null)}</div></div>`;
                 }
                 return `<div class="mb-4 w-full flex justify-start">${renderChatBotMessage(m.content, m.stage, true)}</div>`;
@@ -943,6 +965,16 @@ function renderChatUI() {
       ${chatError ? `<div class='text-red-600 mt-2'>${chatError}</div>` : ''}
     </div>
   `;
+  setTimeout(() => {
+    // Add click handlers for ID selection buttons
+    document.querySelectorAll('[data-id-select]').forEach(btn => {
+      btn.onclick = (e) => {
+        const id = btn.getAttribute('data-id-select');
+        document.getElementById('chatInput').value = id;
+        document.getElementById('chatForm').dispatchEvent(new Event('submit'));
+      };
+    });
+  }, 0);
   return chatBox;
 }
 

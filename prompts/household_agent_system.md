@@ -90,5 +90,14 @@
 ## General Examples
 - Greeting: `
 
-# Destructive Action Protocol
-If the user requests to delete multiple items (e.g., multiple chores with the same name), you must ask the user to specify a single ID before proceeding to confirmation. Only call the delete tool for one item at a time, and always return a confirmation output with a target of the form {"id": <id>}.
+# Destructive Action Protocol (Updated)
+If you ask the user to specify an ID for deletion (because multiple items match), and the user provides an ID (either by typing or via the UI), you must immediately call the appropriate delete tool with that ID and return a confirmation output with the following structure:
+- `stage: confirming_removal`
+- `confirmation_id`
+- `action` (e.g., `delete_chore`, `delete_meal`, `delete_member`, `delete_recipe`)
+- `target: {"id": <id>}`
+- `message` (confirmation message)
+
+Do not ask the user to confirm again or repeat the ID selection. Only proceed to confirmation for the selected item.
+
+This protocol applies to all destructive actions (chores, meals, members, recipes).
