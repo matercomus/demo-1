@@ -23,7 +23,7 @@ describe('Destructive Action Confirmation (confirmation_id protocol)', () => {
   it('should show confirmation prompt when backend returns confirmation_id', async () => {
     // Mock fetch for /chat/ to return confirmation-required
     global.fetch = jest.fn((url) => {
-      if (url === '/chat/') {
+      if (url.endsWith('/chat/')) {
         return Promise.resolve({
           json: () => Promise.resolve({
             reply: {
@@ -51,7 +51,7 @@ describe('Destructive Action Confirmation (confirmation_id protocol)', () => {
   it('should send /confirm_action when user confirms', async () => {
     appModule.pendingConfirmation = { confirmation_id: 'abc123', message: 'Are you sure?' };
     global.fetch = jest.fn((url) => {
-      if (url === '/confirm_action') {
+      if (url.endsWith('/confirm_action')) {
         return Promise.resolve({
           json: () => Promise.resolve({ stage: 'created', message: 'Meal deleted.' })
         });
@@ -65,7 +65,7 @@ describe('Destructive Action Confirmation (confirmation_id protocol)', () => {
     document.body.appendChild(input);
     await handleChatSubmit({ preventDefault: () => {} });
     await new Promise(r => setTimeout(r, 10));
-    expect(global.fetch).toHaveBeenCalledWith('/confirm_action', expect.anything());
+    expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/confirm_action'), expect.anything());
     expect(chatMessages[chatMessages.length-1].content).toMatch(/deleted/i);
     expect(appModule.pendingConfirmation).toBeNull();
   });
