@@ -112,13 +112,35 @@ class InfoOutput(BaseModel):
         return obj
 
 def agent_output_validator(output, ctx):
-    destructive_tool_keys = ["delete_meal", "delete_chore", "delete_member", "delete_recipe"]
-    if isinstance(output, dict):
-        for key in destructive_tool_keys:
-            val = output.get(key)
-            if isinstance(val, dict) and val.get("stage") == "confirming_removal":
-                output = val
+    # For destructive confirmation, require target to be a dict with an 'id' key
+    if isinstance(output, dict) and output.get("stage") == "confirming_removal":
+        target = output.get("target")
+        if not isinstance(target, dict) or "id" not in target:
+            raise ModelRetry(
+                "The 'target' field must be an object with an 'id' field, e.g., {'id': 1}. If multiple items match, ask the user to specify a single ID before confirming deletion. Only confirm one item at a time."
+            )
+    # Handle the case where the user replies with a number after being prompted for an ID
+    # Check if the last message from the assistant was a confirming_removal asking for an ID
+    if ctx and hasattr(ctx, "message_history") and ctx.message_history:
+        last_assistant = None
+        for m in reversed(ctx.message_history):
+            if hasattr(m, "parts"):
+                for part in m.parts:
+                    if hasattr(part, "content") and isinstance(part.content, str) and "confirming_removal" in part.content:
+                        last_assistant = part.content
+                        break
+            if last_assistant:
                 break
+        # If the last assistant message asked for an ID, and the user reply is a number
+        if last_assistant and ctx.message and ctx.message.strip().isdigit():
+            id_val = int(ctx.message.strip())
+            return {
+                "stage": "confirming_removal",
+                "confirmation_id": str(uuid.uuid4()),
+                "action": "delete_chore",  # Default to delete_chore; you may want to infer action from context
+                "target": {"id": id_val},
+                "message": f"Are you sure you want to delete item {id_val}? This action cannot be undone."
+            }
     # Try strict confirmation output
     try:
         return ConfirmationOutput.validate_strict(output)
@@ -142,21 +164,21 @@ class HouseholdAssistantAgent:
             Tool(self._create_chore, takes_ctx=True, name="create_chore"),
             Tool(self._list_chores, takes_ctx=True, name="list_chores"),
             Tool(self._update_chore, takes_ctx=True, name="update_chore"),
-            Tool(self._delete_chore, takes_ctx=True, name="delete_chore"),
+            Tool(self._delete_chore_llm, takes_ctx=True, name="delete_chore"),
             Tool(self._create_meal, takes_ctx=True, name="create_meal"),
             Tool(self._list_meals, takes_ctx=True, name="list_meals"),
             Tool(self._update_meal, takes_ctx=True, name="update_meal"),
-            Tool(self._delete_meal, takes_ctx=True, name="delete_meal"),
+            Tool(self._delete_meal_llm, takes_ctx=True, name="delete_meal"),
             Tool(self._create_member, takes_ctx=True, name="create_member"),
             Tool(self._list_members, takes_ctx=True, name="list_members"),
             Tool(self._update_member, takes_ctx=True, name="update_member"),
-            Tool(self._delete_member, takes_ctx=True, name="delete_member"),
+            Tool(self._delete_member_llm, takes_ctx=True, name="delete_member"),
             Tool(self._create_recipe, takes_ctx=True, name="create_recipe"),
             Tool(self._list_recipes, takes_ctx=True, name="list_recipes"),
             Tool(self._update_recipe, takes_ctx=True, name="update_recipe"),
-            Tool(self._delete_recipe, takes_ctx=True, name="delete_recipe"),
+            Tool(self._delete_recipe_llm, takes_ctx=True, name="delete_recipe"),
         ]
-        # Map tool names to original functions for backend invocation
+        # Map tool names to internal functions for backend invocation
         self.tool_funcs = {
             "create_chore": self._create_chore,
             "list_chores": self._list_chores,
@@ -185,6 +207,7 @@ class HouseholdAssistantAgent:
             system_prompt=self.system_prompt,
             tools=self.tools,
             output_validator=agent_output_validator,
+            retries=3,  # Allow up to 3 retries for the agent as a whole
         )
         # self.agent.model = os.getenv('OPENAI_MODEL', 'openai:gpt-4o')  # Ensure model is always set
         self._start_prompt_watcher()
@@ -316,11 +339,48 @@ class HouseholdAssistantAgent:
             f"Current values:\n- Name: `{c.chore_name}`\n- Assigned: {', '.join(str(m) for m in c.assigned_members)}\n- Repetition: `{c.repetition}`\n- Due Time: `{c.due_time}`\n- Type: `{c.type or ''}`\n- Reminder: `{c.reminder or 'None'}`"
         )
 
+    # LLM-facing wrappers for destructive tools (expose only 'id')
+    async def _delete_meal_llm(self, ctx: RunContext[AssistantDeps], id: int):
+        return await self._delete_meal(ctx, id, force_delete=False)
+    async def _delete_chore_llm(self, ctx: RunContext[AssistantDeps], id: int):
+        return await self._delete_chore(ctx, id, force_delete=False)
+    async def _delete_member_llm(self, ctx: RunContext[AssistantDeps], id: int):
+        return await self._delete_member(ctx, id, force_delete=False)
+    async def _delete_recipe_llm(self, ctx: RunContext[AssistantDeps], id: int):
+        return await self._delete_recipe(ctx, id, force_delete=False)
+
+    # Internal destructive tools (backend only)
+    async def _delete_meal(self, ctx: RunContext[AssistantDeps], id: int, force_delete: bool = False, confirmation_id: str = None):
+        db = ctx.deps.db
+        import logging
+        logger = logging.getLogger("llm_agent.delete_meal")
+        logger.info(f"[DEBUG] delete_meal tool CALLED: id={id}, force_delete={force_delete}, confirmation_id={confirmation_id}, db={db} (type={type(db)})")
+        if force_delete and not confirmation_id:
+            raise Exception("Force delete is only allowed after explicit user confirmation.")
+        try:
+            if not force_delete:
+                confirmation_id = confirmation_id or str(uuid.uuid4())
+                return {
+                    "stage": "confirming_removal",
+                    "confirmation_id": confirmation_id,
+                    "action": "delete_meal",
+                    "target": {"id": id},
+                    "message": "Are you sure you want to delete this meal? This action cannot be undone."
+                }
+            ok = meal_crud.delete_meal(db, id)
+            logger.info(f"[DEBUG] delete_meal: result of delete_meal: {ok}")
+            return {"stage": "created", "message": f"Meal {id} deleted."} if ok else {"stage": "error", "message": f"Meal {id} not found."}
+        except Exception as e:
+            logger.exception(f"[DEBUG] Exception in delete_meal: {e}")
+            return {"stage": "error", "message": str(e)}
+
     async def _delete_chore(self, ctx: RunContext[AssistantDeps], id: int, force_delete: bool = False, confirmation_id: str = None):
         db = ctx.deps.db
         import logging
         logger = logging.getLogger("llm_agent.delete_chore")
         logger.info(f"[DEBUG] delete_chore tool CALLED: id={id}, force_delete={force_delete}, confirmation_id={confirmation_id}, db={db} (type={type(db)})")
+        if force_delete and not confirmation_id:
+            raise Exception("Force delete is only allowed after explicit user confirmation.")
         try:
             if not force_delete:
                 confirmation_id = confirmation_id or str(uuid.uuid4())
@@ -336,6 +396,54 @@ class HouseholdAssistantAgent:
             return {"stage": "created", "message": f"Chore {id} deleted."} if ok else {"stage": "error", "message": f"Chore {id} not found."}
         except Exception as e:
             logger.exception(f"[DEBUG] Exception in delete_chore: {e}")
+            return {"stage": "error", "message": str(e)}
+
+    async def _delete_member(self, ctx: RunContext[AssistantDeps], id: int, force_delete: bool = False, confirmation_id: str = None):
+        db = ctx.deps.db
+        import logging
+        logger = logging.getLogger("llm_agent.delete_member")
+        logger.info(f"[DEBUG] delete_member tool CALLED: id={id}, force_delete={force_delete}, confirmation_id={confirmation_id}, db={db} (type={type(db)})")
+        if force_delete and not confirmation_id:
+            raise Exception("Force delete is only allowed after explicit user confirmation.")
+        try:
+            if not force_delete:
+                confirmation_id = confirmation_id or str(uuid.uuid4())
+                return {
+                    "stage": "confirming_removal",
+                    "confirmation_id": confirmation_id,
+                    "action": "delete_member",
+                    "target": {"id": id},
+                    "message": "Are you sure you want to delete this member? This action cannot be undone."
+                }
+            ok = member_crud.delete_member(db, id)
+            logger.info(f"[DEBUG] delete_member: result of delete_member: {ok}")
+            return {"stage": "created", "message": f"Member {id} deleted."} if ok else {"stage": "error", "message": f"Member {id} not found."}
+        except Exception as e:
+            logger.exception(f"[DEBUG] Exception in delete_member: {e}")
+            return {"stage": "error", "message": str(e)}
+
+    async def _delete_recipe(self, ctx: RunContext[AssistantDeps], id: int, force_delete: bool = False, confirmation_id: str = None):
+        db = ctx.deps.db
+        import logging
+        logger = logging.getLogger("llm_agent.delete_recipe")
+        logger.info(f"[DEBUG] delete_recipe tool CALLED: id={id}, force_delete={force_delete}, confirmation_id={confirmation_id}, db={db} (type={type(db)})")
+        if force_delete and not confirmation_id:
+            raise Exception("Force delete is only allowed after explicit user confirmation.")
+        try:
+            if not force_delete:
+                confirmation_id = confirmation_id or str(uuid.uuid4())
+                return {
+                    "stage": "confirming_removal",
+                    "confirmation_id": confirmation_id,
+                    "action": "delete_recipe",
+                    "target": {"id": id},
+                    "message": "Are you sure you want to delete this recipe? This action cannot be undone."
+                }
+            ok = recipe_crud.delete_recipe(db, id)
+            logger.info(f"[DEBUG] delete_recipe: result of delete_recipe: {ok}")
+            return {"stage": "created", "message": f"Recipe {id} deleted."} if ok else {"stage": "error", "message": f"Recipe {id} not found."}
+        except Exception as e:
+            logger.exception(f"[DEBUG] Exception in delete_recipe: {e}")
             return {"stage": "error", "message": str(e)}
 
     async def _create_meal(self, ctx: RunContext[AssistantDeps], meal_name: str = None, exist: bool = None, meal_kind: str = None, meal_date: str = None, dishes: str = None):
@@ -431,28 +539,6 @@ class HouseholdAssistantAgent:
             "If everything looks good, type **Done** to confirm or **Edit** to change anything."
         )
 
-    async def _delete_meal(self, ctx: RunContext[AssistantDeps], id: int, force_delete: bool = False, confirmation_id: str = None):
-        db = ctx.deps.db
-        import logging
-        logger = logging.getLogger("llm_agent.delete_meal")
-        logger.info(f"[DEBUG] delete_meal tool CALLED: id={id}, force_delete={force_delete}, confirmation_id={confirmation_id}, db={db} (type={type(db)})")
-        try:
-            if not force_delete:
-                confirmation_id = confirmation_id or str(uuid.uuid4())
-                return {
-                    "stage": "confirming_removal",
-                    "confirmation_id": confirmation_id,
-                    "action": "delete_meal",
-                    "target": {"id": id},
-                    "message": "Are you sure you want to delete this meal? This action cannot be undone."
-                }
-            ok = meal_crud.delete_meal(db, id)
-            logger.info(f"[DEBUG] delete_meal: result of delete_meal: {ok}")
-            return {"stage": "created", "message": f"Meal {id} deleted."} if ok else {"stage": "error", "message": f"Meal {id} not found."}
-        except Exception as e:
-            logger.exception(f"[DEBUG] Exception in delete_meal: {e}")
-            return {"stage": "error", "message": str(e)}
-
     async def _create_member(self, ctx: RunContext[AssistantDeps], name: str = None, gender: Optional[str] = None, avatar: Optional[str] = None):
         db = ctx.deps.db
         if not name:
@@ -496,28 +582,6 @@ class HouseholdAssistantAgent:
             f"🖼️ **Avatar:** `{member.avatar or ''}`\n\n"
             "If everything looks good, type **Done** to confirm or **Edit** to change anything."
         )
-
-    async def _delete_member(self, ctx: RunContext[AssistantDeps], id: int, force_delete: bool = False, confirmation_id: str = None):
-        db = ctx.deps.db
-        import logging
-        logger = logging.getLogger("llm_agent.delete_member")
-        logger.info(f"[DEBUG] delete_member tool CALLED: id={id}, force_delete={force_delete}, confirmation_id={confirmation_id}, db={db} (type={type(db)})")
-        try:
-            if not force_delete:
-                confirmation_id = confirmation_id or str(uuid.uuid4())
-                return {
-                    "stage": "confirming_removal",
-                    "confirmation_id": confirmation_id,
-                    "action": "delete_member",
-                    "target": {"id": id},
-                    "message": "Are you sure you want to delete this member? This action cannot be undone."
-                }
-            ok = member_crud.delete_member(db, id)
-            logger.info(f"[DEBUG] delete_member: result of delete_member: {ok}")
-            return {"stage": "created", "message": f"Member {id} deleted."} if ok else {"stage": "error", "message": f"Member {id} not found."}
-        except Exception as e:
-            logger.exception(f"[DEBUG] Exception in delete_member: {e}")
-            return {"stage": "error", "message": str(e)}
 
     async def _list_recipes(self, ctx: RunContext[AssistantDeps]):
         db = ctx.deps.db
@@ -564,25 +628,3 @@ class HouseholdAssistantAgent:
             f"📝 **Description:** `{recipe.description or ''}`\n\n"
             "If everything looks good, type **Done** to confirm or **Edit** to change anything."
         )
-
-    async def _delete_recipe(self, ctx: RunContext[AssistantDeps], id: int, force_delete: bool = False, confirmation_id: str = None):
-        db = ctx.deps.db
-        import logging
-        logger = logging.getLogger("llm_agent.delete_recipe")
-        logger.info(f"[DEBUG] delete_recipe tool CALLED: id={id}, force_delete={force_delete}, confirmation_id={confirmation_id}, db={db} (type={type(db)})")
-        try:
-            if not force_delete:
-                confirmation_id = confirmation_id or str(uuid.uuid4())
-                return {
-                    "stage": "confirming_removal",
-                    "confirmation_id": confirmation_id,
-                    "action": "delete_recipe",
-                    "target": {"id": id},
-                    "message": "Are you sure you want to delete this recipe? This action cannot be undone."
-                }
-            ok = recipe_crud.delete_recipe(db, id)
-            logger.info(f"[DEBUG] delete_recipe: result of delete_recipe: {ok}")
-            return {"stage": "created", "message": f"Recipe {id} deleted."} if ok else {"stage": "error", "message": f"Recipe {id} not found."}
-        except Exception as e:
-            logger.exception(f"[DEBUG] Exception in delete_recipe: {e}")
-            return {"stage": "error", "message": str(e)}

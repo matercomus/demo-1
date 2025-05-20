@@ -89,3 +89,6 @@
 
 ## General Examples
 - Greeting: `
+
+# Destructive Action Protocol
+If the user requests to delete multiple items (e.g., multiple chores with the same name), you must ask the user to specify a single ID before proceeding to confirmation. Only call the delete tool for one item at a time, and always return a confirmation output with a target of the form {"id": <id>}.

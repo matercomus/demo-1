@@ -4,6 +4,7 @@
     "vite": "^6.3.5"
   },
   "scripts": {
-    "dev": "vite"
+    "dev": "vite",
+    "test": "npx jest --testTimeout=30000 --colors --verbose --runInBand --config jest.config.js app.test.js"
   }
 }
