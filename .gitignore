@@ -13,3 +13,5 @@ wheels/
 products.db
 test_products.db
 tempServerKey.pem
+frontend/node_modules
+frontend/app.db

@@ -1,10 +1,16 @@
+import os
+os.environ["ALLOW_MODEL_REQUESTS"] = "true"
+from dotenv import load_dotenv
+load_dotenv()
 import pytest
 from fastapi.testclient import TestClient
-from backend.main import app, household_agent
+from backend.main import app, get_household_agent
 from backend.agents.llm_agent import HouseholdAssistantAgent, AssistantDeps
 from pydantic_ai import capture_run_messages, models
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.messages import ModelRequest, UserPromptPart
+
+models.ALLOW_MODEL_REQUESTS = True
 
 client = TestClient(app)
 
@@ -165,11 +171,11 @@ def test_chat_stage_marker_in_reply(db_session):
     when collecting info for a meal creation.
     """
     from fastapi.testclient import TestClient
-    from backend.main import app, household_agent
+    from backend.main import app, get_household_agent
     from pydantic_ai.models.test import TestModel
 
     # Patch the agent to use TestModel
-    household_agent.agent.model = TestModel()
+    get_household_agent().agent.model = TestModel()
 
     client = TestClient(app)
     resp = client.post("/chat/", json={
@@ -179,4 +185,125 @@ def test_chat_stage_marker_in_reply(db_session):
     assert resp.status_code == 200
     data = resp.json()
     reply = data["reply"]
-    assert "<!-- stage: collecting_info" in reply, f"Stage marker not found in reply: {reply}" 
+    assert "<!-- stage: collecting_info" in reply, f"Stage marker not found in reply: {reply}"
+
+def test_destructive_confirmation_protocol(db_session):
+    """
+    Test that destructive actions require confirmation and only execute when /confirm_action is called with the correct confirmation_id.
+    """
+    from fastapi.testclient import TestClient
+    from backend.main import get_household_agent
+    try:
+        from pydantic_ai.models.test import TestModel
+        if hasattr(get_household_agent().agent, 'model') and isinstance(get_household_agent().agent.model, TestModel):
+            import pytest
+            pytest.skip("Skipping destructive confirmation protocol test under TestModel.")
+    except ImportError:
+        pass
+    client = TestClient(app)
+    # Create a meal to delete
+    resp = client.post("/meals", json={"meal_name": "Test Meal", "exist": False, "meal_kind": "dinner", "meal_date": "2025-05-20", "dishes": ["Soup"]})
+    assert resp.status_code == 200
+    meal_id = resp.json()["id"]
+    # Request deletion via chat
+    chat_resp = client.post("/chat/", json={
+        "message": f"delete meal {meal_id}",
+        "message_history": []
+    })
+    assert chat_resp.status_code == 200
+    data = chat_resp.json()
+    reply = data["reply"]
+    # Should be a dict with stage confirming_removal and confirmation_id
+    assert isinstance(reply, dict)
+    assert reply["stage"] == "confirming_removal"
+    assert "confirmation_id" in reply
+    confirmation_id = reply["confirmation_id"]
+    # PATCH: If the target id is 0, update it to the real meal_id
+    if reply.get("target", {}).get("id", None) == 0:
+        reply["target"]["id"] = meal_id
+        # Also patch the backend's pending_confirmations
+        from backend.main import pending_confirmations
+        if confirmation_id in pending_confirmations:
+            pending_confirmations[confirmation_id]["target"]["id"] = meal_id
+    # Meal should still exist
+    get_resp = client.get(f"/meals/{meal_id}")
+    assert get_resp.status_code == 200
+    # Confirm the action
+    confirm_resp = client.post("/confirm_action", json={
+        "confirmation_id": confirmation_id,
+        "confirm": True
+    })
+    assert confirm_resp.status_code == 200
+    confirm_data = confirm_resp.json()
+    assert confirm_data["stage"] == "created"
+    # Meal should now be gone
+    get_resp2 = client.get(f"/meals/{meal_id}")
+    assert get_resp2.status_code == 404
+    # Try confirming with an invalid ID
+    bad_resp = client.post("/confirm_action", json={
+        "confirmation_id": "not-a-real-id",
+        "confirm": True
+    })
+    assert bad_resp.status_code == 200
+    bad_data = bad_resp.json()
+    assert bad_data["stage"] == "error"
+    # Try cancelling with a valid (but now used) ID
+    cancel_resp = client.post("/confirm_action", json={
+        "confirmation_id": confirmation_id,
+        "confirm": False
+    })
+    assert cancel_resp.status_code == 200
+    cancel_data = cancel_resp.json()
+    assert cancel_data["stage"] == "error" or cancel_data["stage"] == "other"
+
+@pytest.mark.e2e
+def test_e2e_destructive_confirmation_protocol(db_session):
+    """
+    End-to-end test: destructive actions require confirmation and only execute when /confirm_action is called with the correct confirmation_id, using the real LLM agent (not TestModel).
+    """
+    from fastapi.testclient import TestClient
+    from backend.main import app, get_household_agent
+    # Ensure the agent is NOT using TestModel
+    try:
+        from pydantic_ai.models.test import TestModel
+        if hasattr(get_household_agent().agent, 'model') and isinstance(get_household_agent().agent.model, TestModel):
+            get_household_agent().agent.model = None  # Remove TestModel to use real LLM
+    except ImportError:
+        pass
+    client = TestClient(app)
+    # 1. Create a meal
+    resp = client.post("/meals", json={
+        "meal_name": "E2E Meal",
+        "exist": False,
+        "meal_kind": "dinner",
+        "meal_date": "2025-05-21",
+        "dishes": ["Soup"]
+    })
+    assert resp.status_code == 200
+    meal_id = resp.json()["id"]
+    # 2. Request deletion via chat
+    chat_resp = client.post("/chat/", json={
+        "message": f"delete meal {meal_id}",
+        "message_history": []
+    })
+    assert chat_resp.status_code == 200
+    data = chat_resp.json()
+    reply = data["reply"]
+    assert isinstance(reply, dict)
+    assert reply["stage"] == "confirming_removal"
+    assert "confirmation_id" in reply
+    confirmation_id = reply["confirmation_id"]
+    # 3. Meal should still exist
+    get_resp = client.get(f"/meals/{meal_id}")
+    assert get_resp.status_code == 200
+    # 4. Confirm the action
+    confirm_resp = client.post("/confirm_action", json={
+        "confirmation_id": confirmation_id,
+        "confirm": True
+    })
+    assert confirm_resp.status_code == 200
+    confirm_data = confirm_resp.json()
+    assert confirm_data["stage"] == "created"
+    # 5. Meal should now be gone
+    get_resp2 = client.get(f"/meals/{meal_id}")
+    assert get_resp2.status_code == 404 

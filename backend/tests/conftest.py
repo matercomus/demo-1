@@ -1,9 +1,30 @@
 import pytest
 import tempfile
 import os
+import shutil
 from backend.database import get_engine, get_session_local, Base
 from backend.main import app
 from backend.deps import get_db
+
+# --- Automatic backup/restore of app.db for E2E tests ---
+DB_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../app.db'))
+BACKUP_PATH = DB_PATH + '.e2e.bak'
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_sessionstart(session):
+    # Backup app.db before any tests run
+    if os.path.exists(DB_PATH):
+        shutil.copy2(DB_PATH, BACKUP_PATH)
+        print(f"[pytest] Backed up {DB_PATH} to {BACKUP_PATH}")
+
+@pytest.hookimpl(trylast=True)
+def pytest_sessionfinish(session, exitstatus):
+    # Restore app.db after all tests complete
+    if os.path.exists(BACKUP_PATH):
+        shutil.move(BACKUP_PATH, DB_PATH)
+        print(f"[pytest] Restored {DB_PATH} from {BACKUP_PATH}")
+
+# --- Existing test DB fixtures below ---
 
 @pytest.fixture(scope='session')
 def test_db_url():

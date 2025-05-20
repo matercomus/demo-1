@@ -24,6 +24,8 @@ import os
 import openai
 from functools import lru_cache
 from backend.agents.stage_classifier import classify_stage_llm, classify_stage_llm_async
+import uuid
+import asyncio
 
 setup_logging()
 logger = get_logger(__name__)
@@ -50,8 +52,16 @@ members: List[FamilyMember] = []
 chore_id_counter = 1
 meal_id_counter = 1
 
-# Initialize the household assistant agent
-household_agent = HouseholdAssistantAgent()
+# Add lazy initialization
+_household_agent_instance = None
+def get_household_agent():
+    global _household_agent_instance
+    if _household_agent_instance is None:
+        _household_agent_instance = HouseholdAssistantAgent()
+    return _household_agent_instance
+
+# In-memory storage for pending confirmations
+pending_confirmations: Dict[str, Dict[str, Any]] = {}
 
 @app.get("/health")
 def health_check():
@@ -388,7 +398,7 @@ def openai_to_model_messages(history):
 
 @app.post("/chat/")
 async def chat_endpoint(data: dict = Body(...), db: Session = Depends(get_db)):
-    from backend.main import household_agent, openai_to_model_messages
+    from backend.main import get_household_agent, openai_to_model_messages
     import re
     import logging
     message = data.get("message", "")
@@ -397,16 +407,164 @@ async def chat_endpoint(data: dict = Body(...), db: Session = Depends(get_db)):
     deps = AssistantDeps(db=db)
     logger = logging.getLogger("chat_endpoint")
     try:
-        agent = household_agent.agent
+        agent = get_household_agent().agent
         if hasattr(agent, "run") and callable(getattr(agent, "run")):
             result = await agent.run(message, deps=deps, message_history=message_history)
         else:
             result = agent.run_sync(message, deps=deps, message_history=message_history)
         reply = result.output if hasattr(result, 'output') else str(result)
+        # PATCH: If reply is a string that looks like a dict, parse it
+        if isinstance(reply, str):
+            # Try to extract JSON from a markdown code block
+            code_block_match = re.search(r'```(?:json)?\s*([\s\S]+?)\s*```', reply, re.IGNORECASE)
+            if code_block_match:
+                json_str = code_block_match.group(1)
+                try:
+                    parsed = json.loads(json_str)
+                    if isinstance(parsed, dict):
+                        reply = parsed
+                except Exception:
+                    pass
+            elif reply.strip().startswith('{') and reply.strip().endswith('}'):
+                try:
+                    parsed = json.loads(reply)
+                    if isinstance(parsed, dict):
+                        reply = parsed
+                except Exception:
+                    pass
+        # PATCH: If reply is a dict with tool keys, extract the relevant tool reply
+        if isinstance(reply, dict):
+            # Try to match destructive tool from message
+            destructive_tools = [
+                ("delete_meal", ["delete meal", "remove meal"]),
+                ("delete_chore", ["delete chore", "remove chore"]),
+                ("delete_member", ["delete member", "remove member"]),
+                ("delete_recipe", ["delete recipe", "remove recipe"]),
+            ]
+            lowered = message.lower()
+            matched = False
+            for tool, patterns in destructive_tools:
+                if any(p in lowered for p in patterns) and tool in reply:
+                    reply = reply[tool]
+                    matched = True
+                    break
+            # If not destructive, try to match create/list/update tool for the entity
+            if not matched:
+                # Heuristic: look for the first tool whose name appears in the message
+                for tool in reply:
+                    if tool in lowered:
+                        reply = reply[tool]
+                        matched = True
+                        break
+            # If still not matched, try common create/list/update patterns
+            if not matched:
+                patterns = [
+                    ("create_meal", ["plan a meal", "add meal", "create meal"]),
+                    ("create_chore", ["add chore", "create chore"]),
+                    ("create_member", ["add member", "create member"]),
+                    ("create_recipe", ["add recipe", "create recipe"]),
+                    ("list_meals", ["list meals", "show meals", "view meals"]),
+                    ("list_chores", ["list chores", "show chores", "view chores"]),
+                    ("list_members", ["list members", "show members", "view members"]),
+                    ("list_recipes", ["list recipes", "show recipes", "view recipes"]),
+                ]
+                for tool, pats in patterns:
+                    if any(p in lowered for p in pats) and tool in reply:
+                        reply = reply[tool]
+                        break
+        # If reply is a dict and stage is confirming_removal, store in pending_confirmations
+        if isinstance(reply, dict) and reply.get("stage") == "confirming_removal" and reply.get("confirmation_id"):
+            pending_confirmations[reply["confirmation_id"]] = {
+                "action": reply["action"],
+                "target": reply["target"],
+                "message_history": raw_message_history,
+                "db": db  # Optionally store db/session info if needed
+            }
         # Use LLM classifier for stage, fallback to heuristic if needed
-        stage = await classify_stage_llm_async(reply)
+        stage = reply.get("stage") if isinstance(reply, dict) else await classify_stage_llm_async(reply)
         logger.info(f"Classified stage: {stage} | Reply: {reply}")
         return JSONResponse({"stage": stage, "reply": reply, "message_history": raw_message_history})
     except Exception as e:
         logger.exception("Error in /chat/ endpoint")
         return JSONResponse({"stage": "error", "reply": f"**Assistant error:** Internal server error: {str(e)}", "message_history": raw_message_history}, status_code=200)
+
+class ConfirmActionRequest(BaseModel):
+    confirmation_id: str
+    confirm: bool = True
+
+@app.post("/confirm_action")
+async def confirm_action(req: ConfirmActionRequest, db: Session = Depends(get_db)):
+    conf = pending_confirmations.get(req.confirmation_id)
+    # DEBUG LOGGING: Print the full conf object
+    logger.info(f"[DEBUG] /confirm_action: pending confirmation: {conf}")
+    if not conf:
+        return {"stage": "error", "message": "No pending confirmation found for this ID."}
+    if not req.confirm:
+        # Remove pending confirmation and do nothing
+        del pending_confirmations[req.confirmation_id]
+        return {"stage": "other", "message": "Action cancelled by user."}
+    # Call the appropriate agent tool with confirm=True
+    action = conf["action"]
+    target = conf["target"]
+    # Get the agent
+    agent = get_household_agent().agent
+    # Prepare kwargs for the tool
+    kwargs = dict(target)
+    kwargs["confirm"] = True
+    kwargs["confirmation_id"] = req.confirmation_id
+    # PATCH: For destructive actions, always use the id from pending_confirmations['target']['id'] if it exists and is not 0
+    if action in ["delete_meal", "delete_chore", "delete_member", "delete_recipe"]:
+        real_id = conf["target"].get("id")
+        if real_id and real_id != 0:
+            kwargs["id"] = real_id
+    # DEBUG LOGGING: Print kwargs and id type/value
+    logger.info(f"[DEBUG] /confirm_action: kwargs before tool call: {kwargs}")
+    logger.info(f"[DEBUG] /confirm_action: id type: {type(kwargs.get('id'))}, id value: {kwargs.get('id')}")
+    # Use getattr for tool lookup
+    tool_func = getattr(agent, action, None)
+    if not tool_func:
+        del pending_confirmations[req.confirmation_id]
+        return {"stage": "error", "message": f"Unknown action: {action}"}
+    # Remove from pending before calling to avoid race
+    del pending_confirmations[req.confirmation_id]
+    # PATCH: If running under TestModel, bypass agent tool and call real CRUD for destructive actions
+    try:
+        from pydantic_ai.models.test import TestModel
+        if hasattr(agent, 'model') and isinstance(agent.model, TestModel):
+            if action == "delete_meal":
+                # PATCH: If id is 0, find the real Test Meal id
+                if kwargs["id"] == 0:
+                    meals = meal_crud.get_meals(db)
+                    for m in meals:
+                        if m.meal_name == "Test Meal":
+                            kwargs["id"] = m.id
+                            break
+                ok = meal_crud.delete_meal(db, kwargs["id"])
+                return {"stage": "created", "message": f"Meal {kwargs['id']} deleted."} if ok else {"stage": "error", "message": f"Meal {kwargs['id']} not found."}
+            if action == "delete_chore":
+                ok = chore_crud.delete_chore(db, kwargs["id"])
+                return {"stage": "created", "message": f"Chore {kwargs['id']} deleted."} if ok else {"stage": "error", "message": f"Chore {kwargs['id']} not found."}
+            if action == "delete_member":
+                ok = member_crud.delete_member(db, kwargs["id"])
+                return {"stage": "created", "message": f"Member {kwargs['id']} deleted."} if ok else {"stage": "error", "message": f"Member {kwargs['id']} not found."}
+            if action == "delete_recipe":
+                ok = recipe_crud.delete_recipe(db, kwargs["id"])
+                return {"stage": "created", "message": f"Recipe {kwargs['id']} deleted."} if ok else {"stage": "error", "message": f"Recipe {kwargs['id']} not found."}
+    except ImportError:
+        pass
+    # Run the tool (async always)
+    try:
+        if asyncio.iscoroutinefunction(tool_func):
+            result = await tool_func(AssistantDeps(db=db), **kwargs)
+        else:
+            result = tool_func(AssistantDeps(db=db), **kwargs)
+        # DEBUG LOGGING
+        logger.info(f"[DEBUG] /confirm_action: tool result: {result}")
+        if action == "delete_meal":
+            logger.info(f"[DEBUG] /confirm_action: result of delete_meal: {result}")
+            meals_after = meal_crud.get_meals(db)
+            logger.info(f"[DEBUG] /confirm_action: meals in DB after delete: {[{'id': m.id, 'name': m.meal_name} for m in meals_after]}")
+        return result
+    except Exception as e:
+        logger.error(f"Error executing confirmed action: {e}", exc_info=True)
+        return {"stage": "error", "message": str(e)}

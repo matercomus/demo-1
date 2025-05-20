@@ -11,6 +11,7 @@ import threading
 import time
 import logging
 from backend.agents.prompt_watcher import watch_file_for_changes
+import uuid
 
 try:
     from watchdog.observers import Observer
@@ -60,6 +61,7 @@ class AssistantDeps:
 
 class HouseholdAssistantAgent:
     def __init__(self):
+        print("DEBUG: ALLOW_MODEL_REQUESTS =", os.environ.get("ALLOW_MODEL_REQUESTS"))
         load_dotenv()
         self.system_prompt = load_system_prompt()
         self.agent = Agent[
@@ -205,12 +207,27 @@ class HouseholdAssistantAgent:
             )
 
         @self.agent.tool
-        async def delete_chore(ctx: RunContext[AssistantDeps], id: int, confirm: bool = False):
+        async def delete_chore(ctx: RunContext[AssistantDeps], id: int, confirm: bool = False, confirmation_id: str = None):
             db = ctx.deps.db
-            if not confirm:
-                return "<!-- stage: confirming_removal -->\nAre you sure you want to delete this chore? This action cannot be undone. Type 'Yes' to confirm."
-            ok = chore_crud.delete_chore(db, id)
-            return f"Chore {id} deleted." if ok else f"<!-- stage: error -->\nChore {id} not found."
+            import logging
+            logger = logging.getLogger("llm_agent.delete_chore")
+            logger.info(f"[DEBUG] delete_chore tool CALLED: id={id}, confirm={confirm}, confirmation_id={confirmation_id}, db={db} (type={type(db)})")
+            try:
+                if not confirm:
+                    confirmation_id = confirmation_id or str(uuid.uuid4())
+                    return {
+                        "stage": "confirming_removal",
+                        "confirmation_id": confirmation_id,
+                        "action": "delete_chore",
+                        "target": {"id": id},
+                        "message": "Are you sure you want to delete this chore? This action cannot be undone."
+                    }
+                ok = chore_crud.delete_chore(db, id)
+                logger.info(f"[DEBUG] delete_chore: result of delete_chore: {ok}")
+                return {"stage": "created", "message": f"Chore {id} deleted."} if ok else {"stage": "error", "message": f"Chore {id} not found."}
+            except Exception as e:
+                logger.exception(f"[DEBUG] Exception in delete_chore: {e}")
+                return {"stage": "error", "message": str(e)}
 
         @self.agent.tool
         async def create_meal(ctx: RunContext[AssistantDeps], meal_name: str = None, exist: bool = None, meal_kind: str = None, meal_date: str = None, dishes: str = None):
@@ -305,12 +322,29 @@ class HouseholdAssistantAgent:
             )
 
         @self.agent.tool
-        async def delete_meal(ctx: RunContext[AssistantDeps], id: int, confirm: bool = False):
+        async def delete_meal(ctx: RunContext[AssistantDeps], id: int, confirm: bool = False, confirmation_id: str = None):
             db = ctx.deps.db
-            if not confirm:
-                return "<!-- stage: confirming_removal -->\nAre you sure you want to delete this meal? This action cannot be undone. Type 'Yes' to confirm."
-            ok = meal_crud.delete_meal(db, id)
-            return f"Meal {id} deleted." if ok else f"<!-- stage: error -->\nMeal {id} not found."
+            import logging
+            logger = logging.getLogger("llm_agent.delete_meal")
+            logger.info(f"[DEBUG] delete_meal tool CALLED: id={id}, confirm={confirm}, confirmation_id={confirmation_id}, db={db} (type={type(db)})")
+            try:
+                meal_before = meal_crud.get_meal(db, id)
+                logger.info(f"[DEBUG] delete_meal: meal before delete: {meal_before}")
+                if not confirm:
+                    confirmation_id = confirmation_id or str(uuid.uuid4())
+                    return {
+                        "stage": "confirming_removal",
+                        "confirmation_id": confirmation_id,
+                        "action": "delete_meal",
+                        "target": {"id": id},
+                        "message": "Are you sure you want to delete this meal? This action cannot be undone."
+                    }
+                ok = meal_crud.delete_meal(db, id)
+                logger.info(f"[DEBUG] delete_meal: result of delete_meal: {ok}")
+                return {"stage": "created", "message": f"Meal {id} deleted."} if ok else {"stage": "error", "message": f"Meal {id} not found."}
+            except Exception as e:
+                logger.exception(f"[DEBUG] Exception in delete_meal: {e}")
+                return {"stage": "error", "message": str(e)}
 
         @self.agent.tool
         async def create_member(ctx: RunContext[AssistantDeps], name: str = None, gender: Optional[str] = None, avatar: Optional[str] = None):
@@ -360,12 +394,27 @@ class HouseholdAssistantAgent:
             )
 
         @self.agent.tool
-        async def delete_member(ctx: RunContext[AssistantDeps], id: int, confirm: bool = False):
+        async def delete_member(ctx: RunContext[AssistantDeps], id: int, confirm: bool = False, confirmation_id: str = None):
             db = ctx.deps.db
-            if not confirm:
-                return "<!-- stage: confirming_removal -->\nAre you sure you want to delete this member? This action cannot be undone. Type 'Yes' to confirm."
-            ok = member_crud.delete_member(db, id)
-            return f"Member {id} deleted." if ok else f"<!-- stage: error -->\nMember {id} not found."
+            import logging
+            logger = logging.getLogger("llm_agent.delete_member")
+            logger.info(f"[DEBUG] delete_member tool CALLED: id={id}, confirm={confirm}, confirmation_id={confirmation_id}, db={db} (type={type(db)})")
+            try:
+                if not confirm:
+                    confirmation_id = confirmation_id or str(uuid.uuid4())
+                    return {
+                        "stage": "confirming_removal",
+                        "confirmation_id": confirmation_id,
+                        "action": "delete_member",
+                        "target": {"id": id},
+                        "message": "Are you sure you want to delete this member? This action cannot be undone."
+                    }
+                ok = member_crud.delete_member(db, id)
+                logger.info(f"[DEBUG] delete_member: result of delete_member: {ok}")
+                return {"stage": "created", "message": f"Member {id} deleted."} if ok else {"stage": "error", "message": f"Member {id} not found."}
+            except Exception as e:
+                logger.exception(f"[DEBUG] Exception in delete_member: {e}")
+                return {"stage": "error", "message": str(e)}
 
         @self.agent.tool
         async def list_recipes(ctx: RunContext[AssistantDeps]):
@@ -417,9 +466,24 @@ class HouseholdAssistantAgent:
             )
 
         @self.agent.tool
-        async def delete_recipe(ctx: RunContext[AssistantDeps], id: int, confirm: bool = False):
+        async def delete_recipe(ctx: RunContext[AssistantDeps], id: int, confirm: bool = False, confirmation_id: str = None):
             db = ctx.deps.db
-            if not confirm:
-                return "<!-- stage: confirming_removal -->\nAre you sure you want to delete this recipe? This action cannot be undone. Type 'Yes' to confirm."
-            ok = recipe_crud.delete_recipe(db, id)
-            return f"Recipe {id} deleted." if ok else f"<!-- stage: error -->\nRecipe {id} not found."
+            import logging
+            logger = logging.getLogger("llm_agent.delete_recipe")
+            logger.info(f"[DEBUG] delete_recipe tool CALLED: id={id}, confirm={confirm}, confirmation_id={confirmation_id}, db={db} (type={type(db)})")
+            try:
+                if not confirm:
+                    confirmation_id = confirmation_id or str(uuid.uuid4())
+                    return {
+                        "stage": "confirming_removal",
+                        "confirmation_id": confirmation_id,
+                        "action": "delete_recipe",
+                        "target": {"id": id},
+                        "message": "Are you sure you want to delete this recipe? This action cannot be undone."
+                    }
+                ok = recipe_crud.delete_recipe(db, id)
+                logger.info(f"[DEBUG] delete_recipe: result of delete_recipe: {ok}")
+                return {"stage": "created", "message": f"Recipe {id} deleted."} if ok else {"stage": "error", "message": f"Recipe {id} not found."}
+            except Exception as e:
+                logger.exception(f"[DEBUG] Exception in delete_recipe: {e}")
+                return {"stage": "error", "message": str(e)}
