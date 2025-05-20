@@ -1,6 +1,6 @@
 import os
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Union
 from pydantic_ai import Agent, Tool
 from pydantic_ai.tools import RunContext
 from dotenv import load_dotenv
@@ -12,6 +12,9 @@ import time
 import logging
 from backend.agents.prompt_watcher import watch_file_for_changes
 import uuid
+from pydantic import BaseModel
+from pydantic_ai import ModelRetry
+from enum import Enum
 
 try:
     from watchdog.observers import Observer
@@ -59,6 +62,75 @@ def load_system_prompt():
 class AssistantDeps:
     db: object  # SQLAlchemy session
 
+class StageEnum(str, Enum):
+    collecting_info = "collecting_info"
+    confirming_info = "confirming_info"
+    created = "created"
+    error = "error"
+    greeting = "greeting"
+    confirming_removal = "confirming_removal"
+
+class ConfirmationOutput(BaseModel):
+    stage: StageEnum
+    confirmation_id: str
+    action: str
+    target: dict
+    message: str
+
+    @classmethod
+    def validate_strict(cls, value):
+        obj = cls.model_validate(value)
+        if obj.stage != StageEnum.confirming_removal:
+            raise ValueError("stage must be 'confirming_removal'")
+        if not obj.confirmation_id or not isinstance(obj.confirmation_id, str):
+            raise ValueError("confirmation_id must be a non-empty string")
+        if not obj.action or not isinstance(obj.action, str):
+            raise ValueError("action must be a non-empty string")
+        if not obj.target or not isinstance(obj.target, dict) or "id" not in obj.target:
+            raise ValueError("target must be a dict with an 'id' field")
+        if not obj.message or not isinstance(obj.message, str):
+            raise ValueError("message must be a non-empty string")
+        return obj
+
+class InfoOutput(BaseModel):
+    stage: StageEnum
+    message: str
+
+    @classmethod
+    def validate_strict(cls, value):
+        obj = cls.model_validate(value)
+        if obj.stage not in {
+            StageEnum.collecting_info,
+            StageEnum.confirming_info,
+            StageEnum.created,
+            StageEnum.error,
+            StageEnum.greeting,
+        }:
+            raise ValueError(f"stage must be one of info stages, got {obj.stage}")
+        if not obj.message or not isinstance(obj.message, str):
+            raise ValueError("message must be a non-empty string")
+        return obj
+
+def agent_output_validator(output, ctx):
+    destructive_tool_keys = ["delete_meal", "delete_chore", "delete_member", "delete_recipe"]
+    if isinstance(output, dict):
+        for key in destructive_tool_keys:
+            val = output.get(key)
+            if isinstance(val, dict) and val.get("stage") == "confirming_removal":
+                output = val
+                break
+    # Try strict confirmation output
+    try:
+        return ConfirmationOutput.validate_strict(output)
+    except Exception:
+        pass
+    # Try strict info output
+    try:
+        return InfoOutput.validate_strict(output)
+    except Exception:
+        pass
+    raise ModelRetry("Output is not a valid structured response. Please return a valid JSON object for the requested action, with correct stage and fields.")
+
 class HouseholdAssistantAgent:
     def __init__(self):
         print("DEBUG: ALLOW_MODEL_REQUESTS =", os.environ.get("ALLOW_MODEL_REQUESTS"))
@@ -105,15 +177,16 @@ class HouseholdAssistantAgent:
         }
         # Pass self.tools to Agent
         self.agent = Agent[
-            AssistantDeps, str
+            AssistantDeps, Union[ConfirmationOutput, InfoOutput]
         ](
             os.getenv('OPENAI_MODEL', 'openai:gpt-4o'),
             deps_type=AssistantDeps,
-            output_type=str,
+            output_type=Union[ConfirmationOutput, InfoOutput],
             system_prompt=self.system_prompt,
-            tools=self.tools
+            tools=self.tools,
+            output_validator=agent_output_validator,
         )
-        self.agent.model = os.getenv('OPENAI_MODEL', 'openai:gpt-4o')  # Ensure model is always set
+        # self.agent.model = os.getenv('OPENAI_MODEL', 'openai:gpt-4o')  # Ensure model is always set
         self._start_prompt_watcher()
 
     def reload_prompt(self):
@@ -243,14 +316,13 @@ class HouseholdAssistantAgent:
             f"Current values:\n- Name: `{c.chore_name}`\n- Assigned: {', '.join(str(m) for m in c.assigned_members)}\n- Repetition: `{c.repetition}`\n- Due Time: `{c.due_time}`\n- Type: `{c.type or ''}`\n- Reminder: `{c.reminder or 'None'}`"
         )
 
-    async def _delete_chore(self, ctx: RunContext[AssistantDeps], id: int, confirm: bool = False, confirmation_id: str = None):
+    async def _delete_chore(self, ctx: RunContext[AssistantDeps], id: int, force_delete: bool = False, confirmation_id: str = None):
         db = ctx.deps.db
         import logging
         logger = logging.getLogger("llm_agent.delete_chore")
-        logger.info(f"[DEBUG] delete_chore tool CALLED: id={id}, confirm={confirm}, confirmation_id={confirmation_id}, db={db} (type={type(db)})")
+        logger.info(f"[DEBUG] delete_chore tool CALLED: id={id}, force_delete={force_delete}, confirmation_id={confirmation_id}, db={db} (type={type(db)})")
         try:
-            # Only allow confirm=True if confirmation_id is present (i.e., called from /confirm_action)
-            if not confirm or not confirmation_id:
+            if not force_delete:
                 confirmation_id = confirmation_id or str(uuid.uuid4())
                 return {
                     "stage": "confirming_removal",
@@ -341,28 +413,31 @@ class HouseholdAssistantAgent:
         if not m:
             return f"<!-- stage: error -->\nMeal with ID `{id}` not found. Please provide a valid meal ID."
         data = {k: kwargs[k] for k in kwargs if k in MealCreate.model_fields}
+        # Fix: ensure dishes is a list
+        dishes = m.dishes
+        if isinstance(dishes, str):
+            dishes = [d.strip() for d in dishes.split(',') if d.strip()]
         if "dishes" in data and isinstance(data["dishes"], str):
-            data["dishes"] = [data["dishes"]]
-        meal = MealCreate(**{**m.__dict__, **data})
+            data["dishes"] = [d.strip() for d in data["dishes"].split(',') if d.strip()]
+        meal = MealCreate(**{**m.__dict__, **data, "dishes": data.get("dishes", dishes)})
         updated = meal_crud.update_meal(db, id, meal)
         return (
             "<!-- stage: confirming_info -->\n"
             f"✅ **Meal Updated!**\n\n"
-            f"🍽️ **Name:** `{m.meal_name}`\n"
-            f"🍳 **Kind:** `{m.meal_kind}`\n"
-            f"📅 **Date:** `{m.meal_date}`\n"
-            f"🥗 **Dishes:** {', '.join(m.dishes or [])}\n\n"
+            f"🍽️ **Name:** `{meal.meal_name}`\n"
+            f"🍳 **Kind:** `{meal.meal_kind}`\n"
+            f"📅 **Date:** `{meal.meal_date}`\n"
+            f"🥗 **Dishes:** {', '.join(meal.dishes or [])}\n\n"
             "If everything looks good, type **Done** to confirm or **Edit** to change anything."
         )
 
-    async def _delete_meal(self, ctx: RunContext[AssistantDeps], id: int, confirm: bool = False, confirmation_id: str = None):
+    async def _delete_meal(self, ctx: RunContext[AssistantDeps], id: int, force_delete: bool = False, confirmation_id: str = None):
         db = ctx.deps.db
         import logging
         logger = logging.getLogger("llm_agent.delete_meal")
-        logger.info(f"[DEBUG] delete_meal tool CALLED: id={id}, confirm={confirm}, confirmation_id={confirmation_id}, db={db} (type={type(db)})")
+        logger.info(f"[DEBUG] delete_meal tool CALLED: id={id}, force_delete={force_delete}, confirmation_id={confirmation_id}, db={db} (type={type(db)})")
         try:
-            # Only allow confirm=True if confirmation_id is present (i.e., called from /confirm_action)
-            if not confirm or not confirmation_id:
+            if not force_delete:
                 confirmation_id = confirmation_id or str(uuid.uuid4())
                 return {
                     "stage": "confirming_removal",
@@ -422,14 +497,13 @@ class HouseholdAssistantAgent:
             "If everything looks good, type **Done** to confirm or **Edit** to change anything."
         )
 
-    async def _delete_member(self, ctx: RunContext[AssistantDeps], id: int, confirm: bool = False, confirmation_id: str = None):
+    async def _delete_member(self, ctx: RunContext[AssistantDeps], id: int, force_delete: bool = False, confirmation_id: str = None):
         db = ctx.deps.db
         import logging
         logger = logging.getLogger("llm_agent.delete_member")
-        logger.info(f"[DEBUG] delete_member tool CALLED: id={id}, confirm={confirm}, confirmation_id={confirmation_id}, db={db} (type={type(db)})")
+        logger.info(f"[DEBUG] delete_member tool CALLED: id={id}, force_delete={force_delete}, confirmation_id={confirmation_id}, db={db} (type={type(db)})")
         try:
-            # Only allow confirm=True if confirmation_id is present (i.e., called from /confirm_action)
-            if not confirm or not confirmation_id:
+            if not force_delete:
                 confirmation_id = confirmation_id or str(uuid.uuid4())
                 return {
                     "stage": "confirming_removal",
@@ -491,14 +565,13 @@ class HouseholdAssistantAgent:
             "If everything looks good, type **Done** to confirm or **Edit** to change anything."
         )
 
-    async def _delete_recipe(self, ctx: RunContext[AssistantDeps], id: int, confirm: bool = False, confirmation_id: str = None):
+    async def _delete_recipe(self, ctx: RunContext[AssistantDeps], id: int, force_delete: bool = False, confirmation_id: str = None):
         db = ctx.deps.db
         import logging
         logger = logging.getLogger("llm_agent.delete_recipe")
-        logger.info(f"[DEBUG] delete_recipe tool CALLED: id={id}, confirm={confirm}, confirmation_id={confirmation_id}, db={db} (type={type(db)})")
+        logger.info(f"[DEBUG] delete_recipe tool CALLED: id={id}, force_delete={force_delete}, confirmation_id={confirmation_id}, db={db} (type={type(db)})")
         try:
-            # Only allow confirm=True if confirmation_id is present (i.e., called from /confirm_action)
-            if not confirm or not confirmation_id:
+            if not force_delete:
                 confirmation_id = confirmation_id or str(uuid.uuid4())
                 return {
                     "stage": "confirming_removal",

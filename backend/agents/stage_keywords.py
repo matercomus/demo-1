@@ -13,8 +13,14 @@ STAGE_KEYWORDS_PRIORITY = [
     ("greeting", [
         "how can i assist", "how can i help", "how may i assist", "how may i help", "what can i do for you", "hello", "hi", "hey"
     ]),
+    ("confirming_removal", [
+        "are you sure", "cannot be undone", "confirm removal", "confirm deletion", "please confirm deletion", "please confirm removal", "warning", "danger", "confirm destructive", "confirm delete", "confirm remove"
+    ]),
+    ("operation_canceled", [
+        "cancelled", "canceled", "not deleted", "not removed", "action canceled", "operation canceled"
+    ]),
     ("confirming_info", [
-        "confirm", "summary", "does this look", "type 'done'", "type **done**", "edit", "if everything looks good", "if all looks good", "please confirm", "confirm or edit", "update complete", "if everything looks good, type", "if all looks good, type"
+        "summary", "confirm", "does this look", "type 'done'", "type **done**", "edit", "if everything looks good", "if all looks good", "please confirm", "confirm or edit", "update complete", "if everything looks good, type", "if all looks good, type"
     ]),
     ("collecting_info", [
         "what would you like", "please provide", "could you", "missing", "specify", "let's create", "let's add", "what is their name", "what should we call", "who should do this chore", "when should this chore start", "how often should this chore repeat", "what would you like to call this meal", "is this meal already in the recipe database", "what kind of meal is this", "when do you want to have this meal", "what dishes are included in this meal", "what is the name of the recipe", "what kind of recipe is this"

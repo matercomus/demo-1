@@ -250,10 +250,15 @@ function renderStageCard(content, stage, stepInfo = null) {
       progress = `<div class="mb-2 text-xs text-yellow-700 font-semibold">Confirmation</div>`;
     }
   } else if (stage === 'confirming_removal') {
-    accent = 'border-red-200 bg-red-50';
-    icon = '🗑️';
-    border = 'border-red-400';
-    progress = `<div class="mb-2 text-xs text-red-700 font-semibold">Confirm Removal</div>`;
+    accent = 'border-orange-200 bg-orange-50';
+    icon = '⚠️'; // warning icon
+    border = 'border-orange-400';
+    progress = `<div class="mb-2 text-xs text-orange-700 font-semibold">Confirm Removal</div>`;
+  } else if (stage === 'operation_canceled') {
+    accent = 'border-gray-300 bg-gray-50';
+    icon = '🚫'; // canceled icon
+    border = 'border-gray-400';
+    progress = `<div class="mb-2 text-xs text-gray-700 font-semibold">Operation Canceled</div>`;
   } else if (stage === 'created') {
     accent = 'border-green-400 bg-green-50';
     icon = '🎉';
@@ -964,6 +969,9 @@ function handleChatSubmit(e) {
   if (!msg || chatLoading) return;
   input.value = '';
 
+  // Debug log: show pendingConfirmation at submit
+  console.log('pendingConfirmation at submit:', getPendingConfirmation());
+
   // Step: Handle destructive confirmation with confirmation_id
   if (getPendingConfirmation()) {
     if (/^yes$/i.test(msg)) {
@@ -1004,7 +1012,7 @@ function handleChatSubmit(e) {
       return;
     } else if (/^no$/i.test(msg)) {
       chatMessages.push({ role: 'user', content: msg });
-      chatMessages.push({ role: 'bot', content: 'Deletion cancelled.', stage: 'other' });
+      chatMessages.push({ role: 'bot', content: 'Deletion cancelled.', stage: 'operation_canceled' });
       setPendingConfirmation(null);
       renderMenu();
       scrollChatToBottom();
@@ -1036,6 +1044,8 @@ function handleChatSubmit(e) {
   })
     .then(res => res.json())
     .then(data => {
+      // Add this log to see the raw response structure
+      console.log('Raw /chat/ response:', data);
       if (typeof data === 'string') {
         try {
           data = JSON.parse(data);
@@ -1046,6 +1056,7 @@ function handleChatSubmit(e) {
       // If backend returns confirmation-required, store confirmation_id and show prompt
       if (data && data.reply && typeof data.reply === 'object' && data.reply.stage === 'confirming_removal' && data.reply.confirmation_id) {
         setPendingConfirmation(data.reply);
+        console.log('Set pendingConfirmation:', data.reply);
         chatMessages.push({ role: 'bot', content: data.reply.message, stage: 'confirming_removal', destructive: true });
         chatLoading = false;
         renderMenu();

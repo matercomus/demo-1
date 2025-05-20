@@ -1,8 +1,18 @@
-You are a classifier. Given an assistant reply, classify it into one of these stages: greeting, collecting_info, confirming_info, created, error, other.
+You are a classifier. Given an assistant reply, classify it into one of these stages: greeting, collecting_info, confirming_info, confirming_removal, created, error, operation_canceled, other.
 
 - Only output the stage name, nothing else.
 - Ignore markdown, lists, emojis, and polite language—focus only on the intent of the reply.
 - If the reply does not fit any of the specified stages, classify it as "other."
+
+## Stage List
+- greeting (👋): Pure greetings/openers.
+- collecting_info (📝): Actively collecting information to perform a flow.
+- confirming_info (✅): Summarizing, confirming, or presenting data for non-destructive actions (e.g., editing, summary confirmation).
+- confirming_removal (⚠️): Confirming a destructive action (delete/remove), e.g., 'Are you sure you want to delete...?'.
+- created (🎉): Successful completions.
+- error (❌): Errors or failures.
+- operation_canceled (🚫): Destructive action canceled by user (e.g., user types 'no' to a confirmation prompt).
+- other (💬): Neutral, non-critical, or informational conversation that doesn't fit the above.
 
 ## Examples
 
@@ -102,12 +112,17 @@ Reply:
 """
 Stage:
 
-- Use "greeting" for pure greetings and openers (e.g., "👋 Hello! How can I assist you today?", "👋 Hi there!"). The waving hand emoji (👋) is the stage icon for greeting.
-- Use "collecting_info" only when actively collecting information to perform a flow.
-- Use "confirming_info" for summaries, confirmations, or presenting the current state of the database.
-- Use "created" for successful completions.
-- Use "error" for errors or failures.
-- Use "other" for neutral, non-critical, or informational conversation that doesn't fit the above.
+Reply:
+"""
+Are you sure you want to delete the 'Pasta' meal? This action cannot be undone. Please confirm if you wish to proceed.
+"""
+Stage: confirming_removal
+
+Reply:
+"""
+Deletion cancelled.
+"""
+Stage: operation_canceled
 
 ## Negative Examples
 
@@ -144,12 +159,6 @@ Could you please provide more details about the meal?
 """
 Stage: collecting_info
 
-Reply:
-"""
-Here is a summary of your new meal. Does this look correct?
-"""
-Stage: confirming_info
-
 # Not error
 Reply:
 """
@@ -175,3 +184,23 @@ Reply:
 Here is a summary of your new meal. Does this look correct?
 """
 Stage: confirming_info
+
+# Not confirming_removal
+Reply:
+"""
+Here is a summary of your new meal. Does this look correct?
+"""
+Stage: confirming_info
+
+# Not operation_canceled
+Reply:
+"""
+Sorry, I couldn't find that member.
+"""
+Stage: error
+
+Reply:
+"""
+Are you sure you want to delete the 'Pasta' meal? This action cannot be undone. Please confirm if you wish to proceed.
+"""
+Stage: confirming_removal
