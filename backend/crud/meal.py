@@ -22,7 +22,7 @@ def create_meal(db: Session, meal: MealCreate) -> MealORM:
 
 def get_meals(db: Session) -> List[MealORM]:
     logger = logging.getLogger("crud.meal")
-    logger.info(f"[DEBUG] get_meals called")
+    logger.debug(f"[DEBUG] get_meals called")
     return db.query(MealORM).all()
 
 def get_meal(db: Session, meal_id: int) -> Optional[MealORM]:

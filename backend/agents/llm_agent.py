@@ -1,7 +1,7 @@
 import os
 from dataclasses import dataclass
 from typing import Optional
-from pydantic_ai import Agent
+from pydantic_ai import Agent, Tool
 from pydantic_ai.tools import RunContext
 from dotenv import load_dotenv
 from backend.crud import chore as chore_crud, meal as meal_crud, member as member_crud, recipe as recipe_crud
@@ -64,6 +64,46 @@ class HouseholdAssistantAgent:
         print("DEBUG: ALLOW_MODEL_REQUESTS =", os.environ.get("ALLOW_MODEL_REQUESTS"))
         load_dotenv()
         self.system_prompt = load_system_prompt()
+        
+        # Create tools list and store as self.tools
+        self.tools = [
+            Tool(self._create_chore, takes_ctx=True, name="create_chore"),
+            Tool(self._list_chores, takes_ctx=True, name="list_chores"),
+            Tool(self._update_chore, takes_ctx=True, name="update_chore"),
+            Tool(self._delete_chore, takes_ctx=True, name="delete_chore"),
+            Tool(self._create_meal, takes_ctx=True, name="create_meal"),
+            Tool(self._list_meals, takes_ctx=True, name="list_meals"),
+            Tool(self._update_meal, takes_ctx=True, name="update_meal"),
+            Tool(self._delete_meal, takes_ctx=True, name="delete_meal"),
+            Tool(self._create_member, takes_ctx=True, name="create_member"),
+            Tool(self._list_members, takes_ctx=True, name="list_members"),
+            Tool(self._update_member, takes_ctx=True, name="update_member"),
+            Tool(self._delete_member, takes_ctx=True, name="delete_member"),
+            Tool(self._create_recipe, takes_ctx=True, name="create_recipe"),
+            Tool(self._list_recipes, takes_ctx=True, name="list_recipes"),
+            Tool(self._update_recipe, takes_ctx=True, name="update_recipe"),
+            Tool(self._delete_recipe, takes_ctx=True, name="delete_recipe"),
+        ]
+        # Map tool names to original functions for backend invocation
+        self.tool_funcs = {
+            "create_chore": self._create_chore,
+            "list_chores": self._list_chores,
+            "update_chore": self._update_chore,
+            "delete_chore": self._delete_chore,
+            "create_meal": self._create_meal,
+            "list_meals": self._list_meals,
+            "update_meal": self._update_meal,
+            "delete_meal": self._delete_meal,
+            "create_member": self._create_member,
+            "list_members": self._list_members,
+            "update_member": self._update_member,
+            "delete_member": self._delete_member,
+            "create_recipe": self._create_recipe,
+            "list_recipes": self._list_recipes,
+            "update_recipe": self._update_recipe,
+            "delete_recipe": self._delete_recipe,
+        }
+        # Pass self.tools to Agent
         self.agent = Agent[
             AssistantDeps, str
         ](
@@ -71,8 +111,9 @@ class HouseholdAssistantAgent:
             deps_type=AssistantDeps,
             output_type=str,
             system_prompt=self.system_prompt,
+            tools=self.tools
         )
-        self._register_tools()
+        self.agent.model = os.getenv('OPENAI_MODEL', 'openai:gpt-4o')  # Ensure model is always set
         self._start_prompt_watcher()
 
     def reload_prompt(self):
@@ -82,408 +123,393 @@ class HouseholdAssistantAgent:
     def _start_prompt_watcher(self):
         watch_file_for_changes(PROMPT_PATH, self.reload_prompt, logger_name="llm_agent.prompt_watcher")
 
-    def _register_tools(self):
-        @self.agent.tool
-        async def create_chore(ctx: RunContext[AssistantDeps], chore_name: str = None, assigned_members: list = None, start_date: str = None, repetition: str = None, due_time: Optional[str] = None, reminder: Optional[str] = None, type: Optional[str] = None):
-            db = ctx.deps.db
-            # If any required info is missing, ask for it with collecting_info marker
-            missing = []
-            if not chore_name:
-                missing.append("chore_name")
-            if not assigned_members:
-                missing.append("assigned_members")
-            if not start_date:
-                missing.append("start_date")
-            if not repetition:
-                missing.append("repetition")
-            if missing:
-                prompts = {
-                    "chore_name": "📝 **Let's create a new chore!**\nWhat should we call this chore? (e.g., `Laundry`, `Take out trash`)",
-                    "assigned_members": "👤 **Who should do this chore?**\nType one or more names (e.g., `Alex, Jamie`).",
-                    "start_date": "📅 **When should this chore start?**\nFormat: YYYY-MM-DD (e.g., `2023-12-01`).",
-                    "repetition": "🔁 **How often should this chore repeat?**\nChoose one: `daily`, `weekly`, `one-time`."
-                }
-                next_field = missing[0]
-                # Show summary of collected so far
-                summary = []
-                if chore_name: summary.append(f"📝 Name: `{chore_name}`")
-                if assigned_members: summary.append(f"👤 Assigned: {', '.join(str(m) for m in assigned_members)}")
-                if start_date: summary.append(f"📅 Start: `{start_date}`")
-                if repetition: summary.append(f"🔁 Repeats: `{repetition}`")
-                summary_md = "\n".join(summary)
-                return f"<!-- stage: collecting_info -->\n{prompts[next_field]}" + (f"\n\n**So far:**\n{summary_md}" if summary_md else "")
-            try:
-                chore = ChoreCreate(
-                    chore_name=chore_name,
-                    assigned_members=assigned_members,
-                    start_date=start_date,
-                    repetition=repetition,
-                    due_time=due_time or "23:59",
-                    reminder=reminder,
-                    type=type,
-                    icon=None
-                )
-                db_chore = chore_crud.create_chore(db, chore)
-                return (
-                    "<!-- stage: created -->\n"
-                    "🎉 **Chore Created!**\n\n"
-                    f"📝 **Name:** `{chore_name}`\n"
-                    f"👤 **Assigned:** {', '.join(str(m) for m in assigned_members)}\n"
-                    f"📅 **Start Date:** `{start_date}`\n"
-                    f"🔁 **Repetition:** `{repetition}`\n"
-                    f"⏰ **Due Time:** `{due_time or '23:59'}`\n"
-                    f"🏷️ **Type:** `{type or ''}`\n"
-                    f"🔔 **Reminder:** `{reminder or 'None'}`\n"
-                    f"\nChore ID: `{db_chore.id}`"
-                )
-            except Exception as e:
-                return f"**Error creating chore:** `{e}`"
-
-        @self.agent.tool
-        async def list_chores(ctx: RunContext[AssistantDeps]):
-            db = ctx.deps.db
-            chores = chore_crud.get_chores(db)
-            if not chores:
-                return "<!-- stage: confirming_info -->\nNo chores found."
-            # Markdown table
-            header = '| ID | Chore Name | Assigned Members | Repetition | Due Time | Type |\n|---|---|---|---|---|---|'
-            rows = [
-                f"| {c.id} | {c.chore_name} | {', '.join(str(m) for m in c.assigned_members)} | {c.repetition} | {c.due_time} | {c.type or ''} |"
-                for c in chores
-            ]
-            return f"<!-- stage: confirming_info -->\n**Chores**\n\n{header}\n" + "\n".join(rows)
-
-        @self.agent.tool
-        async def update_chore(ctx: RunContext[AssistantDeps], id: int, **kwargs):
-            """
-            Update any field of a chore by ID, including the name. Example: update_chore(id=1, chore_name="Updated Chore").
-            You can also update assigned_members, repetition, due_time, reminder, type, etc. Extract all possible fields from the user's request and call this tool directly.
-            """
-            db = ctx.deps.db
-            c = chore_crud.get_chore(db, id)
-            if not c:
-                return f"<!-- stage: error -->\nChore with ID `{id}` not found. Please provide a valid chore ID."
-            import re
-            new_name = kwargs.get("chore_name")
-            if not new_name:
-                for k, v in kwargs.items():
-                    if k in ["name", "new_name", "to", "called", "as"] and isinstance(v, str):
-                        new_name = v
-                        break
-                if not new_name and hasattr(ctx, "input") and ctx.input:
-                    m = re.search(r"(?:to be called|to have name|to|called|as) ['\"]?([\w\s-]+)['\"]?", ctx.input, re.IGNORECASE)
-                    if m:
-                        new_name = m.group(1).strip()
-            # Merge old values with updates
-            data = {k: kwargs[k] for k in kwargs if k in ChoreCreate.model_fields and kwargs[k] is not None}
-            if new_name:
-                data["chore_name"] = new_name
-            merged = {**c.__dict__, **data}
-            assigned = merged.get("assigned_members")
-            if isinstance(assigned, str):
-                assigned = assigned.split(",") if "," in assigned else [assigned]
-            merged["assigned_members"] = data.get("assigned_members", assigned)
-            merged.pop("_sa_instance_state", None)
-            # If at least one field is being updated, apply the update immediately
-            if data:
-                chore = ChoreCreate(**merged)
-                updated = chore_crud.update_chore(db, id, chore)
-                return (
-                    "<!-- stage: confirming_info -->\n"
-                    f"✅ **Chore Updated!**\n\n"
-                    f"📝 **Name:** `{chore.chore_name}`\n"
-                    f"👤 **Assigned:** {', '.join(str(m) for m in chore.assigned_members)}\n"
-                    f"🔁 **Repetition:** `{chore.repetition}`\n"
-                    f"⏰ **Due Time:** `{chore.due_time}`\n"
-                    f"🏷️ **Type:** `{chore.type or ''}`\n"
-                    f"🔔 **Reminder:** `{chore.reminder or 'None'}`\n\n"
-                    "Update complete!"
-                )
-            # Otherwise, ask for missing info
-            return (
-                "<!-- stage: collecting_info -->\n"
-                "I need more information to update this chore. Please specify what you want to change.\n\n"
-                f"Current values:\n- Name: `{c.chore_name}`\n- Assigned: {', '.join(str(m) for m in c.assigned_members)}\n- Repetition: `{c.repetition}`\n- Due Time: `{c.due_time}`\n- Type: `{c.type or ''}`\n- Reminder: `{c.reminder or 'None'}`"
+    # Tool implementations
+    async def _create_chore(self, ctx: RunContext[AssistantDeps], chore_name: str = None, assigned_members: list = None, start_date: str = None, repetition: str = None, due_time: Optional[str] = None, reminder: Optional[str] = None, type: Optional[str] = None):
+        db = ctx.deps.db
+        # If any required info is missing, ask for it with collecting_info marker
+        missing = []
+        if not chore_name:
+            missing.append("chore_name")
+        if not assigned_members:
+            missing.append("assigned_members")
+        if not start_date:
+            missing.append("start_date")
+        if not repetition:
+            missing.append("repetition")
+        if missing:
+            prompts = {
+                "chore_name": "📝 **Let's create a new chore!**\nWhat should we call this chore? (e.g., `Laundry`, `Take out trash`)",
+                "assigned_members": "👤 **Who should do this chore?**\nType one or more names (e.g., `Alex, Jamie`).",
+                "start_date": "📅 **When should this chore start?**\nFormat: YYYY-MM-DD (e.g., `2023-12-01`).",
+                "repetition": "🔁 **How often should this chore repeat?**\nChoose one: `daily`, `weekly`, `one-time`."
+            }
+            next_field = missing[0]
+            # Show summary of collected so far
+            summary = []
+            if chore_name: summary.append(f"📝 Name: `{chore_name}`")
+            if assigned_members: summary.append(f"👤 Assigned: {', '.join(str(m) for m in assigned_members)}")
+            if start_date: summary.append(f"📅 Start: `{start_date}`")
+            if repetition: summary.append(f"🔁 Repeats: `{repetition}`")
+            summary_md = "\n".join(summary)
+            return f"<!-- stage: collecting_info -->\n{prompts[next_field]}" + (f"\n\n**So far:**\n{summary_md}" if summary_md else "")
+        try:
+            chore = ChoreCreate(
+                chore_name=chore_name,
+                assigned_members=assigned_members,
+                start_date=start_date,
+                repetition=repetition,
+                due_time=due_time or "23:59",
+                reminder=reminder,
+                type=type,
+                icon=None
             )
+            db_chore = chore_crud.create_chore(db, chore)
+            return (
+                "<!-- stage: created -->\n"
+                "🎉 **Chore Created!**\n\n"
+                f"📝 **Name:** `{chore_name}`\n"
+                f"👤 **Assigned:** {', '.join(str(m) for m in assigned_members)}\n"
+                f"📅 **Start Date:** `{start_date}`\n"
+                f"🔁 **Repetition:** `{repetition}`\n"
+                f"⏰ **Due Time:** `{due_time or '23:59'}`\n"
+                f"🏷️ **Type:** `{type or ''}`\n"
+                f"🔔 **Reminder:** `{reminder or 'None'}`\n"
+                f"\nChore ID: `{db_chore.id}`"
+            )
+        except Exception as e:
+            return f"**Error creating chore:** `{e}`"
 
-        @self.agent.tool
-        async def delete_chore(ctx: RunContext[AssistantDeps], id: int, confirm: bool = False, confirmation_id: str = None):
-            db = ctx.deps.db
-            import logging
-            logger = logging.getLogger("llm_agent.delete_chore")
-            logger.info(f"[DEBUG] delete_chore tool CALLED: id={id}, confirm={confirm}, confirmation_id={confirmation_id}, db={db} (type={type(db)})")
-            try:
-                if not confirm:
-                    confirmation_id = confirmation_id or str(uuid.uuid4())
-                    return {
-                        "stage": "confirming_removal",
-                        "confirmation_id": confirmation_id,
-                        "action": "delete_chore",
-                        "target": {"id": id},
-                        "message": "Are you sure you want to delete this chore? This action cannot be undone."
-                    }
-                ok = chore_crud.delete_chore(db, id)
-                logger.info(f"[DEBUG] delete_chore: result of delete_chore: {ok}")
-                return {"stage": "created", "message": f"Chore {id} deleted."} if ok else {"stage": "error", "message": f"Chore {id} not found."}
-            except Exception as e:
-                logger.exception(f"[DEBUG] Exception in delete_chore: {e}")
-                return {"stage": "error", "message": str(e)}
+    async def _list_chores(self, ctx: RunContext[AssistantDeps]):
+        db = ctx.deps.db
+        chores = chore_crud.get_chores(db)
+        if not chores:
+            return "<!-- stage: confirming_info -->\nNo chores found."
+        header = '| ID | Chore Name | Assigned Members | Repetition | Due Time | Type |\n|---|---|---|---|---|---|'
+        rows = [
+            f"| {c.id} | {c.chore_name} | {', '.join(str(m) for m in c.assigned_members)} | {c.repetition} | {c.due_time} | {c.type or ''} |"
+            for c in chores
+        ]
+        return f"<!-- stage: confirming_info -->\n**Chores**\n\n{header}\n" + "\n".join(rows)
 
-        @self.agent.tool
-        async def create_meal(ctx: RunContext[AssistantDeps], meal_name: str = None, exist: bool = None, meal_kind: str = None, meal_date: str = None, dishes: str = None):
-            db = ctx.deps.db
-            missing = []
-            if not meal_name:
-                missing.append("meal_name")
+    async def _update_chore(self, ctx: RunContext[AssistantDeps], id: int, **kwargs):
+        """
+        Update any field of a chore by ID, including the name. Example: update_chore(id=1, chore_name="Updated Chore").
+        You can also update assigned_members, repetition, due_time, reminder, type, etc. Extract all possible fields from the user's request and call this tool directly.
+        """
+        db = ctx.deps.db
+        c = chore_crud.get_chore(db, id)
+        if not c:
+            return f"<!-- stage: error -->\nChore with ID `{id}` not found. Please provide a valid chore ID."
+        import re
+        new_name = kwargs.get("chore_name")
+        if not new_name:
+            for k, v in kwargs.items():
+                if k in ["name", "new_name", "to", "called", "as"] and isinstance(v, str):
+                    new_name = v
+                    break
+            if not new_name and hasattr(ctx, "input") and ctx.input:
+                m = re.search(r"(?:to be called|to have name|to|called|as) ['\"]?([\w\s-]+)['\"]?", ctx.input, re.IGNORECASE)
+                if m:
+                    new_name = m.group(1).strip()
+        # Merge old values with updates
+        data = {k: kwargs[k] for k in kwargs if k in ChoreCreate.model_fields and kwargs[k] is not None}
+        if new_name:
+            data["chore_name"] = new_name
+        merged = {**c.__dict__, **data}
+        assigned = merged.get("assigned_members")
+        if isinstance(assigned, str):
+            assigned = assigned.split(",") if "," in assigned else [assigned]
+        merged["assigned_members"] = data.get("assigned_members", assigned)
+        merged.pop("_sa_instance_state", None)
+        # If at least one field is being updated, apply the update immediately
+        if data:
+            chore = ChoreCreate(**merged)
+            updated = chore_crud.update_chore(db, id, chore)
+            return (
+                "<!-- stage: confirming_info -->\n"
+                f"✅ **Chore Updated!**\n\n"
+                f"📝 **Name:** `{chore.chore_name}`\n"
+                f"👤 **Assigned:** {', '.join(str(m) for m in chore.assigned_members)}\n"
+                f"🔁 **Repetition:** `{chore.repetition}`\n"
+                f"⏰ **Due Time:** `{chore.due_time}`\n"
+                f"🏷️ **Type:** `{chore.type or ''}`\n"
+                f"🔔 **Reminder:** `{chore.reminder or 'None'}`\n\n"
+                "Update complete!"
+            )
+        # Otherwise, ask for missing info
+        return (
+            "<!-- stage: collecting_info -->\n"
+            "I need more information to update this chore. Please specify what you want to change.\n\n"
+            f"Current values:\n- Name: `{c.chore_name}`\n- Assigned: {', '.join(str(m) for m in c.assigned_members)}\n- Repetition: `{c.repetition}`\n- Due Time: `{c.due_time}`\n- Type: `{c.type or ''}`\n- Reminder: `{c.reminder or 'None'}`"
+        )
+
+    async def _delete_chore(self, ctx: RunContext[AssistantDeps], id: int, confirm: bool = False, confirmation_id: str = None):
+        db = ctx.deps.db
+        import logging
+        logger = logging.getLogger("llm_agent.delete_chore")
+        logger.info(f"[DEBUG] delete_chore tool CALLED: id={id}, confirm={confirm}, confirmation_id={confirmation_id}, db={db} (type={type(db)})")
+        try:
+            # Only allow confirm=True if confirmation_id is present (i.e., called from /confirm_action)
+            if not confirm or not confirmation_id:
+                confirmation_id = confirmation_id or str(uuid.uuid4())
+                return {
+                    "stage": "confirming_removal",
+                    "confirmation_id": confirmation_id,
+                    "action": "delete_chore",
+                    "target": {"id": id},
+                    "message": "Are you sure you want to delete this chore? This action cannot be undone."
+                }
+            ok = chore_crud.delete_chore(db, id)
+            logger.info(f"[DEBUG] delete_chore: result of delete_chore: {ok}")
+            return {"stage": "created", "message": f"Chore {id} deleted."} if ok else {"stage": "error", "message": f"Chore {id} not found."}
+        except Exception as e:
+            logger.exception(f"[DEBUG] Exception in delete_chore: {e}")
+            return {"stage": "error", "message": str(e)}
+
+    async def _create_meal(self, ctx: RunContext[AssistantDeps], meal_name: str = None, exist: bool = None, meal_kind: str = None, meal_date: str = None, dishes: str = None):
+        db = ctx.deps.db
+        missing = []
+        if not meal_name:
+            missing.append("meal_name")
+        if exist is None:
+            # Try to infer from context
+            if hasattr(ctx, "input") and ctx.input:
+                if any(word in ctx.input.lower() for word in ["new meal", "plan a meal", "create a meal", "add a meal"]):
+                    exist = False
             if exist is None:
-                # Try to infer from context
-                if hasattr(ctx, "input") and ctx.input:
-                    if any(word in ctx.input.lower() for word in ["new meal", "plan a meal", "create a meal", "add a meal"]):
-                        exist = False
-                if exist is None:
-                    # If all other fields are present, default to False
-                    if meal_name and meal_kind and meal_date:
-                        exist = False
-                if exist is None:
-                    missing.append("exist")
-            if not meal_kind:
-                missing.append("meal_kind")
-            if not meal_date:
-                missing.append("meal_date")
-            if not dishes:
-                missing.append("dishes")
-            if missing:
-                prompts = {
-                    "meal_name": "🍽️ **Let's plan a meal!**\nWhat would you like to call this meal? (e.g., `Pasta Night`)",
-                    "exist": "📖 **Is this meal already in the recipe database?**\nType `true` or `false`. If you see your meal in the suggestions, select it. Otherwise, let me know if this is a new meal.",
-                    "meal_kind": "🍳 **What kind of meal is this?**\nChoose one: `breakfast`, `lunch`, `dinner`, `snack`.",
-                    "meal_date": "📅 **When do you want to have this meal?**\nFormat: YYYY-MM-DD (e.g., `2023-12-01`).",
-                    "dishes": "🍲 **What dishes are included in this meal?**\nList one or more dishes (e.g., `Fish Soup, Salad`)."
+                # If all other fields are present, default to False
+                if meal_name and meal_kind and meal_date:
+                    exist = False
+            if exist is None:
+                missing.append("exist")
+        if not meal_kind:
+            missing.append("meal_kind")
+        if not meal_date:
+            missing.append("meal_date")
+        if not dishes:
+            missing.append("dishes")
+        if missing:
+            prompts = {
+                "meal_name": "🍽️ **Let's plan a meal!**\nWhat would you like to call this meal? (e.g., `Pasta Night`)",
+                "exist": "📖 **Is this meal already in the recipe database?**\nType `true` or `false`. If you see your meal in the suggestions, select it. Otherwise, let me know if this is a new meal.",
+                "meal_kind": "🍳 **What kind of meal is this?**\nChoose one: `breakfast`, `lunch`, `dinner`, `snack`.",
+                "meal_date": "📅 **When do you want to have this meal?**\nFormat: YYYY-MM-DD (e.g., `2023-12-01`).",
+                "dishes": "🍲 **What dishes are included in this meal?**\nList one or more dishes (e.g., `Fish Soup, Salad`)."
+            }
+            next_field = missing[0]
+            summary = f"\n**So far:**\n- Name: `{meal_name or '—'}`\n- Kind: `{meal_kind or '—'}`\n- Date: `{meal_date or '—'}`\n- Dishes: `{dishes or '—'}`"
+            return f"<!-- stage: collecting_info -->\n{prompts[next_field]}{summary}"
+        # All info present, create meal
+        dishes_list = dishes
+        if isinstance(dishes, str):
+            # Split on commas, strip whitespace
+            dishes_list = [d.strip() for d in dishes.split(",") if d.strip()]
+        meal = MealCreate(
+            meal_name=meal_name,
+            exist=exist,
+            meal_kind=meal_kind,
+            meal_date=meal_date,
+            dishes=dishes_list
+        )
+        m = meal_crud.create_meal(db, meal)
+        return (
+            "<!-- stage: created -->\n"
+            "🎉 **Meal Created!**\n\n"
+            f"🍽️ **Name:** `{m.meal_name}`\n"
+            f"🗓️ **Date:** `{m.meal_date}`\n"
+            f"🍳 **Kind:** `{m.meal_kind}`\n"
+            f"🍲 **Dishes:** `{', '.join(m.dishes) if m.dishes else '—'}`\n"
+            f"📖 **Exists in DB:** `{m.exist}`\n"
+            "Meal planning complete!"
+        )
+
+    async def _list_meals(self, ctx: RunContext[AssistantDeps]):
+        db = ctx.deps.db
+        meals = meal_crud.get_meals(db)
+        if not meals:
+            return "<!-- stage: confirming_info -->\nNo meals found."
+        header = '| ID | Meal Name | Kind | Date | Dishes |\n|---|---|---|---|---|'
+        rows = [
+            f"| {m.id} | {m.meal_name} | {m.meal_kind} | {m.meal_date} | {', '.join(m.dishes) if m.dishes else ''} |"
+            for m in meals
+        ]
+        return f"<!-- stage: confirming_info -->\n**Meals**\n\n{header}\n" + "\n".join(rows)
+
+    async def _update_meal(self, ctx: RunContext[AssistantDeps], id: int, **kwargs):
+        db = ctx.deps.db
+        m = meal_crud.get_meal(db, id)
+        if not m:
+            return f"<!-- stage: error -->\nMeal with ID `{id}` not found. Please provide a valid meal ID."
+        data = {k: kwargs[k] for k in kwargs if k in MealCreate.model_fields}
+        if "dishes" in data and isinstance(data["dishes"], str):
+            data["dishes"] = [data["dishes"]]
+        meal = MealCreate(**{**m.__dict__, **data})
+        updated = meal_crud.update_meal(db, id, meal)
+        return (
+            "<!-- stage: confirming_info -->\n"
+            f"✅ **Meal Updated!**\n\n"
+            f"🍽️ **Name:** `{m.meal_name}`\n"
+            f"🍳 **Kind:** `{m.meal_kind}`\n"
+            f"📅 **Date:** `{m.meal_date}`\n"
+            f"🥗 **Dishes:** {', '.join(m.dishes or [])}\n\n"
+            "If everything looks good, type **Done** to confirm or **Edit** to change anything."
+        )
+
+    async def _delete_meal(self, ctx: RunContext[AssistantDeps], id: int, confirm: bool = False, confirmation_id: str = None):
+        db = ctx.deps.db
+        import logging
+        logger = logging.getLogger("llm_agent.delete_meal")
+        logger.info(f"[DEBUG] delete_meal tool CALLED: id={id}, confirm={confirm}, confirmation_id={confirmation_id}, db={db} (type={type(db)})")
+        try:
+            # Only allow confirm=True if confirmation_id is present (i.e., called from /confirm_action)
+            if not confirm or not confirmation_id:
+                confirmation_id = confirmation_id or str(uuid.uuid4())
+                return {
+                    "stage": "confirming_removal",
+                    "confirmation_id": confirmation_id,
+                    "action": "delete_meal",
+                    "target": {"id": id},
+                    "message": "Are you sure you want to delete this meal? This action cannot be undone."
                 }
-                next_field = missing[0]
-                summary = f"\n**So far:**\n- Name: `{meal_name or '—'}`\n- Kind: `{meal_kind or '—'}`\n- Date: `{meal_date or '—'}`\n- Dishes: `{dishes or '—'}`"
-                return f"<!-- stage: collecting_info -->\n{prompts[next_field]}{summary}"
-            # All info present, create meal
-            dishes_list = dishes
-            if isinstance(dishes, str):
-                # Split on commas, strip whitespace
-                dishes_list = [d.strip() for d in dishes.split(",") if d.strip()]
-            meal = MealCreate(
-                meal_name=meal_name,
-                exist=exist,
-                meal_kind=meal_kind,
-                meal_date=meal_date,
-                dishes=dishes_list
-            )
-            m = meal_crud.create_meal(db, meal)
-            return (
-                "<!-- stage: created -->\n"
-                f"🎉 **Meal Created!**\n\n"
-                f"🍽️ **Name:** `{m.meal_name}`\n"
-                f"🗓️ **Date:** `{m.meal_date}`\n"
-                f"🍳 **Kind:** `{m.meal_kind}`\n"
-                f"🍲 **Dishes:** `{', '.join(m.dishes) if m.dishes else '—'}`\n"
-                f"📖 **Exists in DB:** `{m.exist}`\n"
-                "Meal planning complete!"
-            )
+            ok = meal_crud.delete_meal(db, id)
+            logger.info(f"[DEBUG] delete_meal: result of delete_meal: {ok}")
+            return {"stage": "created", "message": f"Meal {id} deleted."} if ok else {"stage": "error", "message": f"Meal {id} not found."}
+        except Exception as e:
+            logger.exception(f"[DEBUG] Exception in delete_meal: {e}")
+            return {"stage": "error", "message": str(e)}
 
-        @self.agent.tool
-        async def list_meals(ctx: RunContext[AssistantDeps]):
-            db = ctx.deps.db
-            meals = meal_crud.get_meals(db)
-            if not meals:
-                return "<!-- stage: confirming_info -->\nNo meals found."
-            header = '| ID | Meal Name | Kind | Date | Dishes |\n|---|---|---|---|---|'
-            rows = [
-                f"| {m.id} | {m.meal_name} | {m.meal_kind} | {m.meal_date} | {', '.join(m.dishes) if m.dishes else ''} |"
-                for m in meals
-            ]
-            return f"<!-- stage: confirming_info -->\n**Meals**\n\n{header}\n" + "\n".join(rows)
+    async def _create_member(self, ctx: RunContext[AssistantDeps], name: str = None, gender: Optional[str] = None, avatar: Optional[str] = None):
+        db = ctx.deps.db
+        if not name:
+            return "<!-- stage: collecting_info -->\n👤 **Let's add a new family member!**\nWhat is their name? (e.g., `Jamie`)"
+        member = FamilyMemberCreate(name=name, gender=gender, avatar=avatar)
+        db_member = member_crud.create_member(db, member)
+        return (
+            "<!-- stage: created -->\n"
+            "🎉 **Family Member Added!**\n\n"
+            f"👤 **Name:** `{name}`\n"
+            f"⚧️ **Gender:** `{gender or ''}`\n"
+            f"🖼️ **Avatar:** `{avatar or ''}`\n"
+            f"\nMember ID: `{db_member.id}`"
+        )
 
-        @self.agent.tool
-        async def update_meal(ctx: RunContext[AssistantDeps], id: int, **kwargs):
-            db = ctx.deps.db
-            m = meal_crud.get_meal(db, id)
-            if not m:
-                return f"<!-- stage: error -->\nMeal with ID `{id}` not found. Please provide a valid meal ID."
-            data = {k: kwargs[k] for k in kwargs if k in MealCreate.model_fields}
-            if "dishes" in data and isinstance(data["dishes"], str):
-                data["dishes"] = [data["dishes"]]
-            meal = MealCreate(**{**m.__dict__, **data})
-            updated = meal_crud.update_meal(db, id, meal)
-            return (
-                "<!-- stage: confirming_info -->\n"
-                f"✅ **Meal Updated!**\n\n"
-                f"🍽️ **Name:** `{m.meal_name}`\n"
-                f"🍳 **Kind:** `{m.meal_kind}`\n"
-                f"📅 **Date:** `{m.meal_date}`\n"
-                f"🥗 **Dishes:** {', '.join(m.dishes or [])}\n\n"
-                "If everything looks good, type **Done** to confirm or **Edit** to change anything."
-            )
+    async def _list_members(self, ctx: RunContext[AssistantDeps]):
+        db = ctx.deps.db
+        members = member_crud.get_members(db)
+        if not members:
+            return "<!-- stage: confirming_info -->\nNo family members found."
+        header = '| ID | Name | Gender | Avatar |\n|---|---|---|---|'
+        rows = [
+            f"| {m.id} | {m.name} | {m.gender or ''} | {m.avatar or ''} |"
+            for m in members
+        ]
+        return f"<!-- stage: confirming_info -->\n**Family Members**\n\n{header}\n" + "\n".join(rows)
 
-        @self.agent.tool
-        async def delete_meal(ctx: RunContext[AssistantDeps], id: int, confirm: bool = False, confirmation_id: str = None):
-            db = ctx.deps.db
-            import logging
-            logger = logging.getLogger("llm_agent.delete_meal")
-            logger.info(f"[DEBUG] delete_meal tool CALLED: id={id}, confirm={confirm}, confirmation_id={confirmation_id}, db={db} (type={type(db)})")
-            try:
-                meal_before = meal_crud.get_meal(db, id)
-                logger.info(f"[DEBUG] delete_meal: meal before delete: {meal_before}")
-                if not confirm:
-                    confirmation_id = confirmation_id or str(uuid.uuid4())
-                    return {
-                        "stage": "confirming_removal",
-                        "confirmation_id": confirmation_id,
-                        "action": "delete_meal",
-                        "target": {"id": id},
-                        "message": "Are you sure you want to delete this meal? This action cannot be undone."
-                    }
-                ok = meal_crud.delete_meal(db, id)
-                logger.info(f"[DEBUG] delete_meal: result of delete_meal: {ok}")
-                return {"stage": "created", "message": f"Meal {id} deleted."} if ok else {"stage": "error", "message": f"Meal {id} not found."}
-            except Exception as e:
-                logger.exception(f"[DEBUG] Exception in delete_meal: {e}")
-                return {"stage": "error", "message": str(e)}
+    async def _update_member(self, ctx: RunContext[AssistantDeps], id: int, **kwargs):
+        db = ctx.deps.db
+        m = member_crud.get_member(db, id)
+        if not m:
+            return f"<!-- stage: error -->\nMember with ID `{id}` not found. Please provide a valid member ID."
+        data = {k: kwargs[k] for k in kwargs if k in FamilyMemberCreate.model_fields}
+        member = FamilyMemberCreate(**{**m.__dict__, **data})
+        updated = member_crud.update_member(db, id, member)
+        return (
+            "<!-- stage: confirming_info -->\n"
+            f"✅ **Member Updated!**\n\n"
+            f"👤 **Name:** `{member.name}`\n"
+            f"⚧️ **Gender:** `{member.gender or ''}`\n"
+            f"🖼️ **Avatar:** `{member.avatar or ''}`\n\n"
+            "If everything looks good, type **Done** to confirm or **Edit** to change anything."
+        )
 
-        @self.agent.tool
-        async def create_member(ctx: RunContext[AssistantDeps], name: str = None, gender: Optional[str] = None, avatar: Optional[str] = None):
-            db = ctx.deps.db
-            if not name:
-                return "<!-- stage: collecting_info -->\n👤 **Let's add a new family member!**\nWhat is their name? (e.g., `Jamie`)"
-            member = FamilyMemberCreate(name=name, gender=gender, avatar=avatar)
-            db_member = member_crud.create_member(db, member)
-            return (
-                "<!-- stage: created -->\n"
-                "🎉 **Family Member Added!**\n\n"
-                f"👤 **Name:** `{name}`\n"
-                f"⚧️ **Gender:** `{gender or ''}`\n"
-                f"🖼️ **Avatar:** `{avatar or ''}`\n"
-                f"\nMember ID: `{db_member.id}`"
-            )
+    async def _delete_member(self, ctx: RunContext[AssistantDeps], id: int, confirm: bool = False, confirmation_id: str = None):
+        db = ctx.deps.db
+        import logging
+        logger = logging.getLogger("llm_agent.delete_member")
+        logger.info(f"[DEBUG] delete_member tool CALLED: id={id}, confirm={confirm}, confirmation_id={confirmation_id}, db={db} (type={type(db)})")
+        try:
+            # Only allow confirm=True if confirmation_id is present (i.e., called from /confirm_action)
+            if not confirm or not confirmation_id:
+                confirmation_id = confirmation_id or str(uuid.uuid4())
+                return {
+                    "stage": "confirming_removal",
+                    "confirmation_id": confirmation_id,
+                    "action": "delete_member",
+                    "target": {"id": id},
+                    "message": "Are you sure you want to delete this member? This action cannot be undone."
+                }
+            ok = member_crud.delete_member(db, id)
+            logger.info(f"[DEBUG] delete_member: result of delete_member: {ok}")
+            return {"stage": "created", "message": f"Member {id} deleted."} if ok else {"stage": "error", "message": f"Member {id} not found."}
+        except Exception as e:
+            logger.exception(f"[DEBUG] Exception in delete_member: {e}")
+            return {"stage": "error", "message": str(e)}
 
-        @self.agent.tool
-        async def list_members(ctx: RunContext[AssistantDeps]):
-            db = ctx.deps.db
-            members = member_crud.get_members(db)
-            if not members:
-                return "<!-- stage: confirming_info -->\nNo family members found."
-            header = '| ID | Name | Gender | Avatar |\n|---|---|---|---|'
-            rows = [
-                f"| {m.id} | {m.name} | {m.gender or ''} | {m.avatar or ''} |"
-                for m in members
-            ]
-            return f"<!-- stage: confirming_info -->\n**Family Members**\n\n{header}\n" + "\n".join(rows)
+    async def _list_recipes(self, ctx: RunContext[AssistantDeps]):
+        db = ctx.deps.db
+        recipes = recipe_crud.get_recipes(db)
+        if not recipes:
+            return "<!-- stage: confirming_info -->\nNo recipes found."
+        header = '| ID | Name | Kind | Description |\n|---|---|---|---|'
+        rows = [
+            f"| {r.id} | {r.name} | {r.kind} | {r.description or ''} |"
+            for r in recipes
+        ]
+        return f"<!-- stage: confirming_info -->\n**Recipes**\n\n{header}\n" + "\n".join(rows)
 
-        @self.agent.tool
-        async def update_member(ctx: RunContext[AssistantDeps], id: int, **kwargs):
-            db = ctx.deps.db
-            m = member_crud.get_member(db, id)
-            if not m:
-                return f"<!-- stage: error -->\nMember with ID `{id}` not found. Please provide a valid member ID."
-            data = {k: kwargs[k] for k in kwargs if k in FamilyMemberCreate.model_fields}
-            member = FamilyMemberCreate(**{**m.__dict__, **data})
-            updated = member_crud.update_member(db, id, member)
-            return (
-                "<!-- stage: confirming_info -->\n"
-                f"✅ **Member Updated!**\n\n"
-                f"👤 **Name:** `{member.name}`\n"
-                f"⚧️ **Gender:** `{member.gender or ''}`\n"
-                f"🖼️ **Avatar:** `{member.avatar or ''}`\n\n"
-                "If everything looks good, type **Done** to confirm or **Edit** to change anything."
-            )
+    async def _create_recipe(self, ctx: RunContext[AssistantDeps], name: str = None, kind: str = None, description: str = ""):
+        db = ctx.deps.db
+        if not name:
+            return "<!-- stage: collecting_info -->\n🍲 **Let's add a new recipe!**\nWhat is the name of the recipe? (e.g., `Mapo Tofu`)"
+        if not kind:
+            return "<!-- stage: collecting_info -->\n🍲 **What kind of recipe is this?**\nChoose one: `breakfast`, `lunch`, `dinner`, `snack`."
+        recipe = RecipeCreate(name=name, kind=kind, description=description)
+        db_recipe = recipe_crud.create_recipe(db, recipe)
+        return (
+            "<!-- stage: created -->\n"
+            "🎉 **Recipe Created!**\n\n"
+            f"🍲 **Name:** `{name}`\n"
+            f"🍳 **Kind:** `{kind}`\n"
+            f"📝 **Description:** `{description}`\n"
+            f"\nRecipe ID: `{db_recipe.id}`"
+        )
 
-        @self.agent.tool
-        async def delete_member(ctx: RunContext[AssistantDeps], id: int, confirm: bool = False, confirmation_id: str = None):
-            db = ctx.deps.db
-            import logging
-            logger = logging.getLogger("llm_agent.delete_member")
-            logger.info(f"[DEBUG] delete_member tool CALLED: id={id}, confirm={confirm}, confirmation_id={confirmation_id}, db={db} (type={type(db)})")
-            try:
-                if not confirm:
-                    confirmation_id = confirmation_id or str(uuid.uuid4())
-                    return {
-                        "stage": "confirming_removal",
-                        "confirmation_id": confirmation_id,
-                        "action": "delete_member",
-                        "target": {"id": id},
-                        "message": "Are you sure you want to delete this member? This action cannot be undone."
-                    }
-                ok = member_crud.delete_member(db, id)
-                logger.info(f"[DEBUG] delete_member: result of delete_member: {ok}")
-                return {"stage": "created", "message": f"Member {id} deleted."} if ok else {"stage": "error", "message": f"Member {id} not found."}
-            except Exception as e:
-                logger.exception(f"[DEBUG] Exception in delete_member: {e}")
-                return {"stage": "error", "message": str(e)}
+    async def _update_recipe(self, ctx: RunContext[AssistantDeps], id: int, **kwargs):
+        db = ctx.deps.db
+        r = recipe_crud.get_recipe(db, id)
+        if not r:
+            return f"<!-- stage: error -->\nRecipe with ID `{id}` not found. Please provide a valid recipe ID."
+        data = {k: kwargs[k] for k in kwargs if k in RecipeCreate.model_fields}
+        recipe = RecipeCreate(**{**r.__dict__, **data})
+        updated = recipe_crud.update_recipe(db, id, recipe)
+        return (
+            "<!-- stage: confirming_info -->\n"
+            f"✅ **Recipe Updated!**\n\n"
+            f"🍲 **Name:** `{recipe.name}`\n"
+            f"🍳 **Kind:** `{recipe.kind}`\n"
+            f"📝 **Description:** `{recipe.description or ''}`\n\n"
+            "If everything looks good, type **Done** to confirm or **Edit** to change anything."
+        )
 
-        @self.agent.tool
-        async def list_recipes(ctx: RunContext[AssistantDeps]):
-            db = ctx.deps.db
-            recipes = recipe_crud.get_recipes(db)
-            if not recipes:
-                return "<!-- stage: confirming_info -->\nNo recipes found."
-            header = '| ID | Name | Kind | Description |\n|---|---|---|---|'
-            rows = [
-                f"| {r.id} | {r.name} | {r.kind} | {r.description or ''} |"
-                for r in recipes
-            ]
-            return f"<!-- stage: confirming_info -->\n**Recipes**\n\n{header}\n" + "\n".join(rows)
-
-        @self.agent.tool
-        async def create_recipe(ctx: RunContext[AssistantDeps], name: str = None, kind: str = None, description: str = ""):
-            db = ctx.deps.db
-            if not name:
-                return "<!-- stage: collecting_info -->\n🍲 **Let's add a new recipe!**\nWhat is the name of the recipe? (e.g., `Mapo Tofu`)"
-            if not kind:
-                return "<!-- stage: collecting_info -->\n🍲 **What kind of recipe is this?**\nChoose one: `breakfast`, `lunch`, `dinner`, `snack`."
-            recipe = RecipeCreate(name=name, kind=kind, description=description)
-            db_recipe = recipe_crud.create_recipe(db, recipe)
-            return (
-                "<!-- stage: created -->\n"
-                "🎉 **Recipe Created!**\n\n"
-                f"🍲 **Name:** `{name}`\n"
-                f"🍳 **Kind:** `{kind}`\n"
-                f"📝 **Description:** `{description}`\n"
-                f"\nRecipe ID: `{db_recipe.id}`"
-            )
-
-        @self.agent.tool
-        async def update_recipe(ctx: RunContext[AssistantDeps], id: int, **kwargs):
-            db = ctx.deps.db
-            r = recipe_crud.get_recipe(db, id)
-            if not r:
-                return f"<!-- stage: error -->\nRecipe with ID `{id}` not found. Please provide a valid recipe ID."
-            data = {k: kwargs[k] for k in kwargs if k in RecipeCreate.model_fields}
-            recipe = RecipeCreate(**{**r.__dict__, **data})
-            updated = recipe_crud.update_recipe(db, id, recipe)
-            return (
-                "<!-- stage: confirming_info -->\n"
-                f"✅ **Recipe Updated!**\n\n"
-                f"🍲 **Name:** `{recipe.name}`\n"
-                f"🍳 **Kind:** `{recipe.kind}`\n"
-                f"📝 **Description:** `{recipe.description or ''}`\n\n"
-                "If everything looks good, type **Done** to confirm or **Edit** to change anything."
-            )
-
-        @self.agent.tool
-        async def delete_recipe(ctx: RunContext[AssistantDeps], id: int, confirm: bool = False, confirmation_id: str = None):
-            db = ctx.deps.db
-            import logging
-            logger = logging.getLogger("llm_agent.delete_recipe")
-            logger.info(f"[DEBUG] delete_recipe tool CALLED: id={id}, confirm={confirm}, confirmation_id={confirmation_id}, db={db} (type={type(db)})")
-            try:
-                if not confirm:
-                    confirmation_id = confirmation_id or str(uuid.uuid4())
-                    return {
-                        "stage": "confirming_removal",
-                        "confirmation_id": confirmation_id,
-                        "action": "delete_recipe",
-                        "target": {"id": id},
-                        "message": "Are you sure you want to delete this recipe? This action cannot be undone."
-                    }
-                ok = recipe_crud.delete_recipe(db, id)
-                logger.info(f"[DEBUG] delete_recipe: result of delete_recipe: {ok}")
-                return {"stage": "created", "message": f"Recipe {id} deleted."} if ok else {"stage": "error", "message": f"Recipe {id} not found."}
-            except Exception as e:
-                logger.exception(f"[DEBUG] Exception in delete_recipe: {e}")
-                return {"stage": "error", "message": str(e)}
+    async def _delete_recipe(self, ctx: RunContext[AssistantDeps], id: int, confirm: bool = False, confirmation_id: str = None):
+        db = ctx.deps.db
+        import logging
+        logger = logging.getLogger("llm_agent.delete_recipe")
+        logger.info(f"[DEBUG] delete_recipe tool CALLED: id={id}, confirm={confirm}, confirmation_id={confirmation_id}, db={db} (type={type(db)})")
+        try:
+            # Only allow confirm=True if confirmation_id is present (i.e., called from /confirm_action)
+            if not confirm or not confirmation_id:
+                confirmation_id = confirmation_id or str(uuid.uuid4())
+                return {
+                    "stage": "confirming_removal",
+                    "confirmation_id": confirmation_id,
+                    "action": "delete_recipe",
+                    "target": {"id": id},
+                    "message": "Are you sure you want to delete this recipe? This action cannot be undone."
+                }
+            ok = recipe_crud.delete_recipe(db, id)
+            logger.info(f"[DEBUG] delete_recipe: result of delete_recipe: {ok}")
+            return {"stage": "created", "message": f"Recipe {id} deleted."} if ok else {"stage": "error", "message": f"Recipe {id} not found."}
+        except Exception as e:
+            logger.exception(f"[DEBUG] Exception in delete_recipe: {e}")
+            return {"stage": "error", "message": str(e)}

@@ -9,6 +9,7 @@ from backend.agents.llm_agent import HouseholdAssistantAgent, AssistantDeps
 from pydantic_ai import capture_run_messages, models
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.messages import ModelRequest, UserPromptPart
+import logging
 
 models.ALLOW_MODEL_REQUESTS = True
 
@@ -256,20 +257,26 @@ def test_destructive_confirmation_protocol(db_session):
     cancel_data = cancel_resp.json()
     assert cancel_data["stage"] == "error" or cancel_data["stage"] == "other"
 
+@pytest.fixture
+def real_agent():
+    """Fixture to provide a real agent (not TestModel) for e2e tests."""
+    # Create a new agent instance with real LLM
+    agent = HouseholdAssistantAgent()
+    agent.agent.model = None  # Remove TestModel to use real LLM
+    # Store the original instance
+    original = get_household_agent()
+    # Replace the global instance
+    global _household_agent_instance
+    _household_agent_instance = agent
+    yield agent
+    # Restore the original instance after the test
+    _household_agent_instance = original
+
 @pytest.mark.e2e
-def test_e2e_destructive_confirmation_protocol(db_session):
+def test_e2e_destructive_confirmation_protocol(db_session, real_agent):
     """
     End-to-end test: destructive actions require confirmation and only execute when /confirm_action is called with the correct confirmation_id, using the real LLM agent (not TestModel).
     """
-    from fastapi.testclient import TestClient
-    from backend.main import app, get_household_agent
-    # Ensure the agent is NOT using TestModel
-    try:
-        from pydantic_ai.models.test import TestModel
-        if hasattr(get_household_agent().agent, 'model') and isinstance(get_household_agent().agent.model, TestModel):
-            get_household_agent().agent.model = None  # Remove TestModel to use real LLM
-    except ImportError:
-        pass
     client = TestClient(app)
     # 1. Create a meal
     resp = client.post("/meals", json={
@@ -303,7 +310,25 @@ def test_e2e_destructive_confirmation_protocol(db_session):
     })
     assert confirm_resp.status_code == 200
     confirm_data = confirm_resp.json()
+    logger = logging.getLogger("test_e2e_destructive_confirmation_protocol")
+    logger.info(f"CONFIRM DATA: {confirm_data}")
     assert confirm_data["stage"] == "created"
     # 5. Meal should now be gone
     get_resp2 = client.get(f"/meals/{meal_id}")
-    assert get_resp2.status_code == 404 
+    assert get_resp2.status_code == 404
+    # Try confirming with an invalid ID
+    bad_resp = client.post("/confirm_action", json={
+        "confirmation_id": "not-a-real-id",
+        "confirm": True
+    })
+    assert bad_resp.status_code == 200
+    bad_data = bad_resp.json()
+    assert bad_data["stage"] == "error"
+    # Try cancelling with a valid (but now used) ID
+    cancel_resp = client.post("/confirm_action", json={
+        "confirmation_id": confirmation_id,
+        "confirm": False
+    })
+    assert cancel_resp.status_code == 200
+    cancel_data = cancel_resp.json()
+    assert cancel_data["stage"] == "error" or cancel_data["stage"] == "other" 

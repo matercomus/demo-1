@@ -11,6 +11,9 @@ let chatMessages = [];
 let chatLoading = false;
 let chatError = '';
 
+// Set the backend API base URL
+const API_BASE = 'http://localhost:8000';
+
 // --- Global pendingConfirmation getter/setter ---
 function getPendingConfirmation() {
   if (typeof window !== 'undefined') return window.pendingConfirmation;
@@ -167,7 +170,7 @@ let step = async function(userInput = null, confirm = false) {
   stepError = '';
   renderStepStage();
   try {
-    const res = await fetch(`http://localhost:8000${endpoint}`, {
+    const res = await fetch(`${API_BASE}${endpoint}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -622,7 +625,7 @@ async function fetchAndShowList(listMode) {
     endpoint = '/recipes';
     label = 'Recipes';
   }
-  const res = await fetch(`http://localhost:8000${endpoint}`);
+  const res = await fetch(`${API_BASE}${endpoint}`);
   const data = await res.json();
   app.innerHTML = `
     <h2 class="text-xl font-semibold text-blue-700 mb-4">All ${label}</h2>
@@ -660,7 +663,7 @@ async function renderEditMembers() {
   // Fetch members from backend
   async function fetchMembers() {
     try {
-      const res = await fetch('http://localhost:8000/members');
+      const res = await fetch(`${API_BASE}/members`);
       if (!res.ok) throw new Error('Failed to fetch members');
       return await res.json();
     } catch (e) {
@@ -834,14 +837,14 @@ async function renderEditMembers() {
           loading = true;
           renderPage();
           if (editingId) {
-            await fetch(`http://localhost:8000/members/${editingId}`, {
+            await fetch(`${API_BASE}/members/${editingId}`, {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(confirmData)
             });
             message = 'Family member updated!';
           } else {
-            await fetch('http://localhost:8000/members', {
+            await fetch(`${API_BASE}/members`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(confirmData)
@@ -878,7 +881,7 @@ async function renderEditMembers() {
           try {
             loading = true;
             renderPage();
-            await fetch(`http://localhost:8000/members/${id}`, { method: 'DELETE' });
+            await fetch(`${API_BASE}/members/${id}`, { method: 'DELETE' });
             await refreshMembers();
           } catch (e) {
             error = 'Failed to delete family member.';
@@ -911,6 +914,10 @@ function renderChatUI() {
             if (m.role === 'bot') {
               // Use the stage field for card styling
               if (m.stage && m.stage !== 'unknown') {
+                // Special style for destructive confirmation
+                if (m.stage === 'confirming_removal') {
+                  return `<div class="mb-4 w-full flex justify-start"><div class="w-full">${renderStageCard(`<span class='font-bold text-red-700'>${window.marked ? window.marked.parse(m.content) : m.content}</span><div class='mt-2 text-sm text-red-600'>Please type <b>yes</b> to confirm or <b>no</b> to cancel.</div>`, 'confirming_removal', null)}</div></div>`;
+                }
                 return `<div class="mb-4 w-full flex justify-start">${renderChatBotMessage(m.content, m.stage, true)}</div>`;
               }
               // Otherwise, render as a normal bubble
@@ -924,10 +931,10 @@ function renderChatUI() {
         ${chatLoading ? '<div class="flex items-center gap-2 text-gray-500"><svg class="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path></svg> Assistant is typing...</div>' : ''}
       </div>
       <form id="chatForm" class="flex gap-2">
-        <input id="chatInput" class="flex-1 px-3 py-2 rounded border border-gray-300 focus:border-blue-500" type="text" placeholder="Type your message..." autocomplete="off" ${chatLoading ? 'disabled' : ''} ${window.pendingRemoval ? '' : ''} />
+        <input id="chatInput" class="flex-1 px-3 py-2 rounded border border-gray-300 focus:border-blue-500" type="text" placeholder="Type your message..." autocomplete="off" ${chatLoading ? 'disabled' : ''} ${(getPendingConfirmation() ? '' : '')} />
         <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded shadow hover:bg-blue-700 transition" ${chatLoading ? 'disabled' : ''}>Send</button>
       </form>
-      ${window.pendingRemoval ? `<div class='text-red-600 mt-2'>Please type <b>yes</b> to confirm or <b>no</b> to cancel.</div>` : ''}
+      ${getPendingConfirmation() ? `<div class='text-red-600 mt-2'>Please type <b>yes</b> to confirm or <b>no</b> to cancel.</div>` : ''}
       ${chatError ? `<div class='text-red-600 mt-2'>${chatError}</div>` : ''}
     </div>
   `;
@@ -965,7 +972,7 @@ function handleChatSubmit(e) {
       chatError = '';
       renderMenu();
       scrollChatToBottom();
-      fetch('/confirm_action', {
+      fetch(`${API_BASE}/confirm_action`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -998,7 +1005,6 @@ function handleChatSubmit(e) {
     } else if (/^no$/i.test(msg)) {
       chatMessages.push({ role: 'user', content: msg });
       chatMessages.push({ role: 'bot', content: 'Deletion cancelled.', stage: 'other' });
-      // Optionally: send cancel to backend
       setPendingConfirmation(null);
       renderMenu();
       scrollChatToBottom();
@@ -1017,7 +1023,7 @@ function handleChatSubmit(e) {
   chatError = '';
   renderMenu();
   scrollChatToBottom();
-  fetch('/chat/', {
+  fetch(`${API_BASE}/chat/`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -1093,7 +1099,7 @@ function renderCreateRecipe() {
     const name = document.getElementById('recipeName').value;
     const kind = document.getElementById('recipeKind').value;
     const description = document.getElementById('recipeDescription').value;
-    const res = await fetch('http://localhost:8000/recipes', {
+    const res = await fetch(`${API_BASE}/recipes`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, kind, description })
@@ -1110,22 +1116,24 @@ function renderCreateRecipe() {
 // Initial render
 renderMenu();
 
-// Export for testing
-module.exports = {
-  handleChatSubmit,
-  chatMessages,
-  renderMenu,
-  get pendingRemoval() {
-    return (typeof window !== 'undefined') ? window.pendingRemoval : globalThis.pendingRemoval;
-  },
-  set pendingRemoval(val) {
-    if (typeof window !== 'undefined') window.pendingRemoval = val;
-    else if (typeof globalThis !== 'undefined') globalThis.pendingRemoval = val;
-  },
-  get pendingConfirmation() {
-    return getPendingConfirmation();
-  },
-  set pendingConfirmation(val) {
-    setPendingConfirmation(val);
-  },
-};
+// Only export for Node.js (e.g., for Jest tests)
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    handleChatSubmit,
+    chatMessages,
+    renderMenu,
+    get pendingRemoval() {
+      return (typeof window !== 'undefined') ? window.pendingRemoval : globalThis.pendingRemoval;
+    },
+    set pendingRemoval(val) {
+      if (typeof window !== 'undefined') window.pendingRemoval = val;
+      else if (typeof globalThis !== 'undefined') globalThis.pendingRemoval = val;
+    },
+    get pendingConfirmation() {
+      return getPendingConfirmation();
+    },
+    set pendingConfirmation(val) {
+      setPendingConfirmation(val);
+    },
+  };
+}
